@@ -1,16 +1,9 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import {
-  Activity,
   ArrowLeft,
   ArrowRight,
-  BookOpen,
   Check,
-  CircleDot,
-  FileText,
-  Flag,
-  Lightbulb,
   Minus,
-  MoreHorizontal,
   Plus,
 } from 'lucide-react'
 import { formatDateRange } from '../lib/date'
@@ -26,15 +19,6 @@ interface TaskRowProps {
   onNotify: (message: string) => void
 }
 
-function TaskGlyph({ title }: { title: string }) {
-  if (title.includes('运动')) return <Activity />
-  if (title.includes('阅读')) return <BookOpen />
-  if (title.includes('单词')) return <Lightbulb />
-  if (title.includes('会议')) return <FileText />
-  if (title.includes('复盘')) return <Flag />
-  return <CircleDot />
-}
-
 export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
   const [offset, setOffset] = useState(0)
   const [acting, setActing] = useState(false)
@@ -44,6 +28,7 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
     dragged: false,
     horizontal: false,
     active: false,
+    lastOffset: 0,
   })
   const complete = isTaskComplete(task)
   const positiveDisabled = task.type === 'single' ? task.completed : task.count >= task.targetCount
@@ -51,7 +36,11 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
   const progress = task.type === 'progress' ? Math.round((task.count / task.targetCount) * 100) : 0
 
   const performAction = async (direction: SwipeDirection) => {
-    if (acting || (direction === 'positive' ? positiveDisabled : negativeDisabled)) return
+    if (acting) return
+    if (direction === 'positive' ? positiveDisabled : negativeDisabled) {
+      setOffset(0)
+      return
+    }
     setActing(true)
     try {
       const changed = await onAction(direction)
@@ -80,6 +69,7 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
       dragged: false,
       horizontal: false,
       active: true,
+      lastOffset: 0,
     }
     event.currentTarget.setPointerCapture?.(event.pointerId)
   }
@@ -92,7 +82,9 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
     if (Math.abs(deltaX) > 6) {
       gesture.current.dragged = true
       gesture.current.horizontal = true
-      setOffset(Math.max(-88, Math.min(88, deltaX)))
+      const nextOffset = Math.max(-88, Math.min(88, deltaX))
+      gesture.current.lastOffset = nextOffset
+      setOffset(nextOffset)
     }
   }
 
@@ -102,8 +94,10 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
-    if (offset > 54) void performAction('positive')
-    else if (offset < -54) void performAction('negative')
+    const releasedOffset = gesture.current.lastOffset
+    gesture.current.lastOffset = 0
+    if (releasedOffset > 54) void performAction('positive')
+    else if (releasedOffset < -54) void performAction('negative')
     else setOffset(0)
   }
 
@@ -135,7 +129,7 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
         {task.type === 'single' ? <Check /> : <Minus />}
       </div>
       <div
-        className="task-row"
+        className={`task-row is-${task.type}`}
         role="button"
         tabIndex={0}
         aria-label={`打开任务：${task.title}`}
@@ -145,6 +139,7 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
         onPointerUp={handlePointerUp}
         onPointerCancel={() => {
           gesture.current.active = false
+          gesture.current.lastOffset = 0
           setOffset(0)
         }}
         onClick={handleOpen}
@@ -161,10 +156,6 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
         >
           {complete && <Check />}
         </button>
-
-        <span className="task-glyph" aria-hidden="true">
-          <TaskGlyph title={task.title} />
-        </span>
 
         <span className="task-copy">
           <span className="task-title">{task.title}</span>
@@ -186,33 +177,32 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
           )}
         </span>
 
-        <span className="task-inline-actions">
-          <button
-            type="button"
-            aria-label={task.type === 'single' ? '撤销完成' : '进度减一'}
-            disabled={negativeDisabled || acting}
-            onClick={(event) => {
-              event.stopPropagation()
-              void performAction('negative')
-            }}
-          >
-            <Minus />
-          </button>
-          <button
-            type="button"
-            aria-label={task.type === 'single' ? '完成任务' : '进度加一'}
-            disabled={positiveDisabled || acting}
-            onClick={(event) => {
-              event.stopPropagation()
-              void performAction('positive')
-            }}
-          >
-            <Plus />
-          </button>
-          <span className="task-more" aria-hidden="true">
-            <MoreHorizontal />
+        {task.type === 'progress' && (
+          <span className="task-inline-actions">
+            <button
+              type="button"
+              aria-label="进度减一"
+              disabled={negativeDisabled || acting}
+              onClick={(event) => {
+                event.stopPropagation()
+                void performAction('negative')
+              }}
+            >
+              <Minus />
+            </button>
+            <button
+              type="button"
+              aria-label="进度加一"
+              disabled={positiveDisabled || acting}
+              onClick={(event) => {
+                event.stopPropagation()
+                void performAction('positive')
+              }}
+            >
+              <Plus />
+            </button>
           </span>
-        </span>
+        )}
       </div>
     </div>
   )

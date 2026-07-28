@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getScopeRange, taskOverlapsScope } from './date'
+import { formatDateRange, getScopeRange, normalizeDateTimeInput, taskOverlapsScope } from './date'
 
 describe('任务时间看板规则', () => {
   const reference = new Date(2026, 6, 28, 14, 0, 0)
@@ -14,17 +14,32 @@ describe('任务时间看板规则', () => {
     expect(
       taskOverlapsScope({ startDate: '2026-07-20', endDate: '2026-07-27' }, 'today', reference),
     ).toBe(false)
+    expect(
+      taskOverlapsScope(
+        { startDate: '2026-07-28T23:58', endDate: '2026-07-28T23:59' },
+        'today',
+        reference,
+      ),
+    ).toBe(true)
   })
 
   it('本周使用周一到周日', () => {
     const range = getScopeRange('week', reference)
     expect(range?.start).toEqual(new Date(2026, 6, 27))
-    expect(range?.end).toEqual(new Date(2026, 7, 2))
+    expect(range?.end).toEqual(new Date(2026, 7, 2, 23, 59, 59, 999))
   })
 
   it('全部看板不受时间限制', () => {
     expect(
       taskOverlapsScope({ startDate: '2020-01-01', endDate: '2020-01-02' }, 'all', reference),
     ).toBe(true)
+  })
+
+  it('兼容旧日期数据，并展示分钟级时间范围', () => {
+    expect(normalizeDateTimeInput('2026-07-28', 'start')).toBe('2026-07-28T00:00')
+    expect(normalizeDateTimeInput('2026-07-28', 'end')).toBe('2026-07-28T23:59')
+    expect(formatDateRange('2026-07-28T09:05', '2026-07-28T10:30')).toBe(
+      '7/28 09:05 – 10:30',
+    )
   })
 })

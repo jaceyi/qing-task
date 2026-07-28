@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeft, CalendarDays, Check, Layers3, X } from 'lucide-react'
-import { toDateInput } from '../lib/date'
+import { addMinutes, normalizeDateTimeInput, toDateTimeInput } from '../lib/date'
 import type { Task, TaskDraft, TaskType } from '../types'
 
 interface TaskFormPanelProps {
@@ -10,12 +10,15 @@ interface TaskFormPanelProps {
 }
 
 function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
-  const today = toDateInput()
+  const now = new Date()
+  now.setSeconds(0, 0)
+  const startTime = toDateTimeInput(now)
+  const endTime = toDateTimeInput(addMinutes(now, 60))
   if (!sourceTask) {
     return {
       title: '',
-      startDate: today,
-      endDate: today,
+      startDate: startTime,
+      endDate: endTime,
       type: 'single',
       targetCount: 5,
       count: 0,
@@ -24,8 +27,8 @@ function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
   }
   return {
     title: `${sourceTask.title}（副本）`,
-    startDate: sourceTask.startDate,
-    endDate: sourceTask.endDate,
+    startDate: normalizeDateTimeInput(sourceTask.startDate, 'start'),
+    endDate: normalizeDateTimeInput(sourceTask.endDate, 'end'),
     type: sourceTask.type,
     targetCount: sourceTask.type === 'progress' ? sourceTask.targetCount : 5,
     count: 0,
@@ -135,7 +138,7 @@ export function TaskFormPanel({ sourceTask, onClose, onSubmit }: TaskFormPanelPr
                 value={draft.targetCount}
                 onChange={(event) => setDraft({ ...draft, targetCount: Number(event.target.value) })}
               />
-              <small>新任务的进度从 0 开始。</small>
+            <small>新任务的进度从 0 开始。</small>
             </label>
           )}
 
@@ -143,23 +146,25 @@ export function TaskFormPanel({ sourceTask, onClose, onSubmit }: TaskFormPanelPr
             <legend><CalendarDays /> 时间范围</legend>
             <div className="date-grid">
               <label>
-                <span>开始日期</span>
+                <span>开始时间</span>
                 <input
-                  type="date"
+                  type="datetime-local"
+                  step="60"
                   value={draft.startDate}
                   onChange={(event) => setDraft({ ...draft, startDate: event.target.value })}
                 />
               </label>
               <label>
-                <span>结束日期</span>
+                <span>结束时间</span>
                 <input
-                  type="date"
+                  type="datetime-local"
+                  step="60"
                   value={draft.endDate}
                   onChange={(event) => setDraft({ ...draft, endDate: event.target.value })}
                 />
               </label>
             </div>
-            <small>时间只影响任务出现在哪个看板，不限制操作。</small>
+            <small>支持精确到分钟；时间只影响任务出现在哪个看板，不限制操作。</small>
           </fieldset>
 
           {error && <p className="form-error" role="alert">{error}</p>}
