@@ -1,0 +1,75 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function validTask(data) {
+      return data.keys().hasOnly([
+          'title', 'startDate', 'endDate', 'type', 'targetCount', 'count',
+          'completed', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasAll([
+          'title', 'startDate', 'endDate', 'type', 'targetCount', 'count',
+          'completed', 'createdAt', 'updatedAt'
+        ])
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 120
+        && data.startDate is string
+        && data.endDate is string
+        && data.type in ['single', 'progress']
+        && data.targetCount is int
+        && data.count is int
+        && data.completed is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (
+          (data.type == 'single'
+            && data.targetCount == 0
+            && data.count == 0)
+          ||
+          (data.type == 'progress'
+            && data.targetCount >= 1
+            && data.targetCount <= 99999
+            && data.count >= 0
+            && data.count <= data.targetCount
+            && data.completed == false)
+        );
+    }
+
+    function validLog(data) {
+      return data.keys().hasOnly(['type', 'action', 'payload', 'createdAt'])
+        && data.keys().hasAll(['type', 'action', 'payload', 'createdAt'])
+        && data.type in ['update', 'progress']
+        && data.action is string
+        && data.action.size() > 0
+        && data.action.size() <= 120
+        && data.payload is map
+        && data.createdAt is timestamp;
+    }
+
+    match /users/{userId}/tasks/{taskId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validTask(request.resource.data);
+
+      match /logs/{logId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && validLog(request.resource.data);
+        allow update: if false;
+      }
+    }
+
+    match /users/{userId}/settings/{settingId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && settingId == 'preferences'
+        && request.resource.data.keys().hasOnly(['hideCompleted', 'updatedAt'])
+        && request.resource.data.hideCompleted is bool
+        && request.resource.data.updatedAt is timestamp;
+      allow delete: if false;
+    }
+  }
+}
