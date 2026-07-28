@@ -22,6 +22,12 @@ const scopes: Array<{ id: BoardScope; label: string }> = [
   { id: 'all', label: '全部' },
 ]
 
+const scopeTitles: Record<BoardScope, string> = {
+  today: '今日任务',
+  week: '本周任务',
+  all: '全部任务',
+}
+
 export function TaskBoard({
   tasks,
   scope,
@@ -41,7 +47,7 @@ export function TaskBoard({
   return (
     <section className="board-view" aria-labelledby="page-title">
       <div className="mobile-board-header">
-        <h1 id="page-title">今日任务</h1>
+        <h1 id="page-title">{scopeTitles[scope]}</h1>
       </div>
 
       <div className="scope-tabs" role="tablist" aria-label="任务时间范围">

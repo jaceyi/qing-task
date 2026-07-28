@@ -130,19 +130,44 @@ export async function updateTaskInfo(
       count: nextCount,
       updatedAt: serverTimestamp(),
     }
+
+    const changes: Array<{
+      action: string
+      before: string | number
+      after: string | number
+    }> = []
+    if (current.title !== next.title) {
+      changes.push({ action: '修改任务名称', before: current.title, after: next.title })
+    }
+    if (current.startDate !== next.startDate) {
+      changes.push({ action: '修改开始日期', before: current.startDate, after: next.startDate })
+    }
+    if (current.endDate !== next.endDate) {
+      changes.push({ action: '修改结束日期', before: current.endDate, after: next.endDate })
+    }
+    if (current.type === 'progress' && current.targetCount !== next.targetCount) {
+      changes.push({
+        action: '修改目标次数',
+        before: current.targetCount,
+        after: next.targetCount,
+      })
+    }
+    if (current.type === 'progress' && current.count !== next.count) {
+      changes.push({
+        action: '目标缩减，调整当前进度',
+        before: current.count,
+        after: next.count,
+      })
+    }
+
+    if (changes.length === 0) return
     transaction.update(reference, next)
-    transaction.set(
-      newLogRef(userId, taskId),
-      logData('update', '修改任务信息', {
-        before: {
-          title: current.title,
-          startDate: current.startDate,
-          endDate: current.endDate,
-          targetCount: current.targetCount,
-        },
-        after: { ...fields, targetCount },
-      }),
-    )
+    changes.forEach((change) => {
+      transaction.set(
+        newLogRef(userId, taskId),
+        logData('update', change.action, { before: change.before, after: change.after }),
+      )
+    })
   })
 }
 

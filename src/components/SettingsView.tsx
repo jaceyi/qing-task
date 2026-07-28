@@ -29,7 +29,7 @@ export function SettingsView({
         <section className="settings-section">
           <div className="settings-section-heading"><Eye /><div><h2>任务显示</h2><p>控制看板中的完成态。</p></div></div>
           <label className="setting-row">
-            <span><strong>隐藏已完成任务</strong><small>开启后，完成任务仍保存在云端和全部任务中。</small></span>
+            <span><strong>隐藏已完成任务</strong><small>只隐藏显示，不会删除任务，可随时重新开启。</small></span>
             <input
               type="checkbox"
               role="switch"

@@ -177,7 +177,7 @@ function App() {
         </div>
         <div className="mobile-top-title">
           <span className="brand-mark"><Check /></span>
-          <strong>{selectedTask ? '任务详情' : view === 'settings' ? '设置' : '今日任务'}</strong>
+          <strong>{selectedTask ? '任务详情' : view === 'settings' ? '设置' : `${scopeLabels[boardScope]}任务`}</strong>
         </div>
         <div className={`search-box ${mobileSearchOpen ? 'is-open' : ''}`}>
           <Search />
