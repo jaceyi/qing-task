@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { signOut } from 'firebase/auth'
 import {
-  Archive,
   ArrowLeft,
   ArrowRight,
   CalendarDays,
@@ -10,6 +9,7 @@ import {
   ChevronDown,
   Cloud,
   CloudOff,
+  ListTodo,
   LogOut,
   Plus,
   Search,
@@ -20,6 +20,8 @@ import {
 import { auth } from './lib/firebase'
 import { taskOverlapsScope } from './lib/date'
 import { useAuth } from './hooks/useAuth'
+import { useAppRoute } from './hooks/useAppRoute'
+import { usePwaInstall } from './hooks/usePwaInstall'
 import { useTaskData, useTaskLogs } from './hooks/useTaskData'
 import { LoginScreen } from './components/LoginScreen'
 import { PwaPrompt } from './components/PwaPrompt'
@@ -29,8 +31,6 @@ import { TaskDetail } from './components/TaskDetail'
 import { TaskFormPanel } from './components/TaskFormPanel'
 import type { BoardScope, Task, TaskDraft, TaskType } from './types'
 import './App.css'
-
-type AppView = BoardScope | 'settings'
 
 const scopeLabels: Record<BoardScope, string> = {
   today: '今天',
@@ -51,22 +51,31 @@ function LoadingScreen() {
 function App() {
   const demoMode = import.meta.env.DEV && new URLSearchParams(window.location.search).has('demo')
   const { user, loading: authLoading, error: authError, setError: setAuthError } = useAuth()
+  const { route, navigate, goBackToBoard, fromScope } = useAppRoute()
+  const pwaInstall = usePwaInstall()
   const userId = user?.uid ?? null
   const taskData = useTaskData(userId, demoMode)
-  const [view, setView] = useState<AppView>('today')
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [formSource, setFormSource] = useState<Task | null | undefined>(undefined)
   const [searchTerm, setSearchTerm] = useState('')
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [toast, setToast] = useState('')
   const [online, setOnline] = useState(navigator.onLine)
   const toastTimer = useRef<number | undefined>(undefined)
+  const selectedTaskId = route.name === 'task-detail' ? route.taskId : null
   const selectedTask = useMemo(
     () => taskData.tasks.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, taskData.tasks],
   )
   const { logs, error: logsError } = useTaskLogs(userId, selectedTask, demoMode)
+  const boardScope: BoardScope = route.name === 'board' ? route.scope : fromScope
+  const settingsOpen = route.name === 'settings'
+  const showingDetail = route.name === 'task-detail'
+  const formSource: Task | null | undefined =
+    route.name === 'task-new'
+      ? route.copiedFrom
+        ? taskData.tasks.find((task) => task.id === route.copiedFrom) ?? null
+        : null
+      : undefined
 
   useEffect(() => {
     const handleOnline = () => setOnline(true)
@@ -80,8 +89,15 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (selectedTaskId && !selectedTask && !taskData.loading) setSelectedTaskId(null)
-  }, [selectedTask, selectedTaskId, taskData.loading])
+    if (selectedTaskId && !selectedTask && !taskData.loading) {
+      navigate({ name: 'board', scope: boardScope }, { replace: true, fromScope: boardScope })
+    }
+  }, [boardScope, navigate, selectedTask, selectedTaskId, taskData.loading])
+
+  useEffect(() => {
+    const main = document.querySelector<HTMLElement>('.main-content')
+    main?.scrollTo({ top: 0 })
+  }, [route])
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
@@ -91,16 +107,10 @@ function App() {
     toastTimer.current = window.setTimeout(() => setToast(''), 2600)
   }
 
-  const navigate = (next: AppView) => {
-    setView(next)
-    setSelectedTaskId(null)
+  const navigateToBoard = (scope: BoardScope) => {
+    navigate({ name: 'board', scope }, { fromScope: scope })
     setProfileOpen(false)
-    if (next === 'all') setSearchTerm('')
-  }
-
-  const setScope = (scope: BoardScope) => {
-    setView(scope)
-    setSelectedTaskId(null)
+    if (scope === 'all') setSearchTerm('')
   }
 
   const handleTaskAction = async (task: Task, direction: 'positive' | 'negative') => {
@@ -119,7 +129,7 @@ function App() {
 
   const handleCreate = async (draft: TaskDraft, copiedFrom?: string) => {
     await taskData.createTask(draft, copiedFrom)
-    setFormSource(undefined)
+    goBackToBoard(boardScope)
     notify(copiedFrom ? '任务副本已创建' : '任务已创建')
   }
 
@@ -134,20 +144,16 @@ function App() {
   const displayName = user?.displayName || (demoMode ? '体验用户' : '轻任务用户')
   const email = user?.email || (demoMode ? 'demo@local.preview' : '')
   const avatarText = displayName.slice(0, 1).toUpperCase()
-  const boardScope: BoardScope = view === 'settings' ? 'today' : view
-  const showingDetail = Boolean(selectedTask)
-
   return (
-    <div className={`app-shell ${showingDetail || view === 'settings' ? 'main-wide' : ''}`}>
+    <div className={`app-shell ${showingDetail || settingsOpen ? 'main-wide' : ''}`}>
       <aside className="icon-rail" aria-label="主要导航">
-        <button type="button" className="rail-brand" onClick={() => navigate('today')} aria-label="轻任务首页">
+        <button type="button" className="rail-brand" onClick={() => navigateToBoard(boardScope)} aria-label="轻任务首页">
           <Check />
         </button>
         <nav>
-          <button type="button" className={view === 'today' ? 'is-active' : ''} onClick={() => navigate('today')} aria-label="今日任务"><CalendarDays /></button>
-          <button type="button" className={view === 'all' ? 'is-active' : ''} onClick={() => navigate('all')} aria-label="全部任务"><Archive /></button>
+          <button type="button" className={!settingsOpen ? 'is-active' : ''} onClick={() => navigateToBoard(boardScope)} aria-label="任务"><ListTodo /></button>
         </nav>
-        <button type="button" className={view === 'settings' ? 'is-active' : ''} onClick={() => navigate('settings')} aria-label="设置"><Settings /></button>
+        <button type="button" className={settingsOpen ? 'is-active' : ''} onClick={() => navigate({ name: 'settings' }, { fromScope: boardScope })} aria-label="设置"><Settings /></button>
       </aside>
 
       <aside className="board-sidebar">
@@ -157,8 +163,8 @@ function App() {
             <button
               key={scope}
               type="button"
-              className={view === scope ? 'is-active' : ''}
-              onClick={() => setScope(scope)}
+              className={route.name === 'board' && boardScope === scope ? 'is-active' : ''}
+              onClick={() => navigateToBoard(scope)}
             >
               <span><CalendarDays />{scopeLabels[scope]}</span>
               <strong>{countForScope(scope)}</strong>
@@ -173,11 +179,11 @@ function App() {
 
       <header className="topbar">
         <div className="breadcrumb desktop-only">
-          <span>任务</span><b>/</b><strong>{selectedTask ? '详情' : view === 'settings' ? '设置' : scopeLabels[boardScope]}</strong>
+          <span>任务</span><b>/</b><strong>{selectedTask ? '详情' : settingsOpen ? '设置' : scopeLabels[boardScope]}</strong>
         </div>
         <div className="mobile-top-title">
           <span className="brand-mark"><Check /></span>
-          <strong>{selectedTask ? '任务详情' : view === 'settings' ? '设置' : `${scopeLabels[boardScope]}任务`}</strong>
+          <strong>{selectedTask ? '任务详情' : settingsOpen ? '设置' : `${scopeLabels[boardScope]}任务`}</strong>
         </div>
         <div className={`search-box ${mobileSearchOpen ? 'is-open' : ''}`}>
           <Search />
@@ -190,7 +196,7 @@ function App() {
           {searchTerm && <button type="button" aria-label="清空搜索" onClick={() => setSearchTerm('')}><X /></button>}
         </div>
         <button type="button" className="icon-button mobile-search-button" aria-label="搜索" onClick={() => setMobileSearchOpen((open) => !open)}><Search /></button>
-        <button type="button" className="primary-button top-create-button" onClick={() => setFormSource(null)}><Plus /> 新建任务</button>
+        <button type="button" className="primary-button top-create-button" onClick={() => navigate({ name: 'task-new' }, { fromScope: boardScope })}><Plus /> 新建任务</button>
         <div className="profile-menu-wrap">
           <button type="button" className="profile-button" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)}>
             <span className="avatar">
@@ -201,7 +207,7 @@ function App() {
           {profileOpen && (
             <div className="profile-popover">
               <div><strong>{displayName}</strong><small>{email}</small></div>
-              <button type="button" onClick={() => navigate('settings')}><Settings /> 设置</button>
+              <button type="button" onClick={() => navigate({ name: 'settings' }, { fromScope: boardScope })}><Settings /> 设置</button>
               {!demoMode && <button type="button" onClick={() => void signOut(auth)}><LogOut /> 退出登录</button>}
             </div>
           )}
@@ -218,28 +224,31 @@ function App() {
             task={selectedTask}
             logs={logs}
             logsError={logsError}
-            onBack={() => setSelectedTaskId(null)}
-            onCopy={() => setFormSource(selectedTask)}
+            onBack={() => goBackToBoard(boardScope)}
+            onCopy={() => navigate({ name: 'task-new', copiedFrom: selectedTask.id }, { fromScope: boardScope })}
             onSave={(fields) => taskData.updateTask(selectedTask.id, fields)}
             onChangeType={(nextType: TaskType, targetCount?: number) => taskData.changeType(selectedTask.id, nextType, targetCount)}
             onSetCompleted={(completed) => taskData.setCompleted(selectedTask.id, completed)}
             onAdjust={(delta) => taskData.adjustProgress(selectedTask.id, delta)}
             onDelete={async () => {
               await taskData.deleteTask(selectedTask.id)
-              setSelectedTaskId(null)
+              goBackToBoard(boardScope)
             }}
             onNotify={notify}
           />
-        ) : view === 'settings' ? (
+        ) : settingsOpen ? (
           <SettingsView
             preferences={taskData.preferences}
             displayName={displayName}
             email={email}
             photoURL={user?.photoURL}
+            installState={pwaInstall.state}
             onPreferencesChange={taskData.setPreferences}
             onSignOut={async () => {
               if (!demoMode) await signOut(auth)
             }}
+            onInstall={pwaInstall.install}
+            onNotify={notify}
           />
         ) : (
           <TaskBoard
@@ -248,16 +257,16 @@ function App() {
             hideCompleted={taskData.preferences.hideCompleted}
             searchTerm={searchTerm}
             loading={taskData.loading}
-            onScopeChange={setScope}
-            onOpenTask={(task) => setSelectedTaskId(task.id)}
+            onScopeChange={navigateToBoard}
+            onOpenTask={(task) => navigate({ name: 'task-detail', taskId: task.id }, { fromScope: boardScope })}
             onTaskAction={handleTaskAction}
-            onCreate={() => setFormSource(null)}
+            onCreate={() => navigate({ name: 'task-new' }, { fromScope: boardScope })}
             onNotify={notify}
           />
         )}
       </main>
 
-      {!showingDetail && view !== 'settings' && (
+      {!showingDetail && !settingsOpen && (
         <aside className="utility-panel">
           <section>
             <div className="utility-title"><SlidersHorizontal /><h2>操作方式</h2></div>
@@ -287,14 +296,13 @@ function App() {
       )}
 
       <nav className="bottom-nav" aria-label="移动端导航">
-        <button type="button" className={view === 'today' ? 'is-active' : ''} onClick={() => navigate('today')}><CalendarDays /><span>今日</span></button>
-        <button type="button" className="mobile-add-button" aria-label="新建任务" onClick={() => setFormSource(null)}><Plus /></button>
-        <button type="button" className={view === 'all' ? 'is-active' : ''} onClick={() => navigate('all')}><Archive /><span>全部</span></button>
-        <button type="button" className={view === 'settings' ? 'is-active' : ''} onClick={() => navigate('settings')}><Settings /><span>设置</span></button>
+        <button type="button" className={!settingsOpen ? 'is-active' : ''} onClick={() => navigateToBoard(boardScope)}><ListTodo /><span>任务</span></button>
+        <button type="button" className="mobile-add-button" aria-label="新建任务" onClick={() => navigate({ name: 'task-new' }, { fromScope: boardScope })}><Plus /><span>新建</span></button>
+        <button type="button" className={settingsOpen ? 'is-active' : ''} onClick={() => navigate({ name: 'settings' }, { fromScope: boardScope })}><Settings /><span>设置</span></button>
       </nav>
 
       {formSource !== undefined && (
-        <TaskFormPanel sourceTask={formSource} onClose={() => setFormSource(undefined)} onSubmit={handleCreate} />
+        <TaskFormPanel sourceTask={formSource} onClose={() => goBackToBoard(boardScope)} onSubmit={handleCreate} />
       )}
 
       {toast && (

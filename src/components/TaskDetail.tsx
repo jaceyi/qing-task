@@ -11,7 +11,7 @@ import {
   Save,
   Trash2,
 } from 'lucide-react'
-import { formatLogDate } from '../lib/date'
+import { formatLogDate, normalizeDateTimeInput } from '../lib/date'
 import { isTaskComplete } from '../lib/taskLogic'
 import type { Task, TaskLog, TaskType } from '../types'
 
@@ -58,20 +58,22 @@ export function TaskDetail({
   onNotify,
 }: TaskDetailProps) {
   const [title, setTitle] = useState(task.title)
-  const [startDate, setStartDate] = useState(task.startDate)
-  const [endDate, setEndDate] = useState(task.endDate)
+  const [startDate, setStartDate] = useState(() => normalizeDateTimeInput(task.startDate, 'start'))
+  const [endDate, setEndDate] = useState(() => normalizeDateTimeInput(task.endDate, 'end'))
   const [targetCount, setTargetCount] = useState(task.targetCount || 5)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmTypeChange, setConfirmTypeChange] = useState<TaskType | null>(null)
   const complete = isTaskComplete(task)
+  const displayedType = confirmTypeChange ?? task.type
 
   useEffect(() => {
     setTitle(task.title)
-    setStartDate(task.startDate)
-    setEndDate(task.endDate)
+    setStartDate(normalizeDateTimeInput(task.startDate, 'start'))
+    setEndDate(normalizeDateTimeInput(task.endDate, 'end'))
     setTargetCount(task.targetCount || 5)
+    setConfirmTypeChange(null)
   }, [task])
 
   const saveInfo = async () => {
@@ -126,8 +128,8 @@ export function TaskDetail({
   return (
     <section className="detail-view" aria-labelledby="detail-title">
       <header className="detail-header">
-        <button type="button" className="back-button" onClick={onBack}>
-          <ArrowLeft /> 返回
+        <button type="button" className="back-button" onClick={onBack} aria-label="返回任务列表">
+          <ArrowLeft /><span className="back-label">返回</span>
         </button>
         <div>
           <span className="eyebrow">任务详情</span>
@@ -153,12 +155,12 @@ export function TaskDetail({
                 <input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} />
               </label>
               <label className="field-group">
-                <span>开始日期</span>
-                <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+                <span>开始时间</span>
+                <input type="datetime-local" step="60" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
               </label>
               <label className="field-group">
-                <span>结束日期</span>
-                <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+                <span>结束时间</span>
+                <input type="datetime-local" step="60" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
               </label>
               {task.type === 'progress' && (
                 <label className="field-group">
@@ -182,16 +184,16 @@ export function TaskDetail({
             <div className="type-selector detail-type-selector">
               <button
                 type="button"
-                className={task.type === 'single' ? 'is-active' : ''}
-                onClick={() => task.type !== 'single' && setConfirmTypeChange('single')}
+                className={displayedType === 'single' ? 'is-active' : ''}
+                onClick={() => setConfirmTypeChange(task.type === 'single' ? null : 'single')}
               >
                 <Check />
                 <span><strong>普通任务</strong><small>一次完成</small></span>
               </button>
               <button
                 type="button"
-                className={task.type === 'progress' ? 'is-active' : ''}
-                onClick={() => task.type !== 'progress' && setConfirmTypeChange('progress')}
+                className={displayedType === 'progress' ? 'is-active' : ''}
+                onClick={() => setConfirmTypeChange(task.type === 'progress' ? null : 'progress')}
               >
                 <Layers3 />
                 <span><strong>进度任务</strong><small>多次累积</small></span>

@@ -140,10 +140,10 @@ export async function updateTaskInfo(
       changes.push({ action: '修改任务名称', before: current.title, after: next.title })
     }
     if (current.startDate !== next.startDate) {
-      changes.push({ action: '修改开始日期', before: current.startDate, after: next.startDate })
+      changes.push({ action: '修改开始时间', before: current.startDate, after: next.startDate })
     }
     if (current.endDate !== next.endDate) {
-      changes.push({ action: '修改结束日期', before: current.endDate, after: next.endDate })
+      changes.push({ action: '修改结束时间', before: current.endDate, after: next.endDate })
     }
     if (current.type === 'progress' && current.targetCount !== next.targetCount) {
       changes.push({

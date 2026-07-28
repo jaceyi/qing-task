@@ -1,4 +1,6 @@
-import { Cloud, Download, Eye, LogOut, ShieldCheck } from 'lucide-react'
+import { useState } from 'react'
+import { CheckCircle2, Cloud, Download, Eye, LogOut, ShieldCheck } from 'lucide-react'
+import type { PwaInstallState } from '../hooks/usePwaInstall'
 import type { UserPreferences } from '../types'
 
 interface SettingsViewProps {
@@ -6,8 +8,11 @@ interface SettingsViewProps {
   displayName: string
   email: string
   photoURL?: string | null
+  installState: PwaInstallState
   onPreferencesChange: (next: UserPreferences) => Promise<void>
   onSignOut: () => Promise<void>
+  onInstall: () => Promise<boolean>
+  onNotify: (message: string) => void
 }
 
 export function SettingsView({
@@ -15,9 +20,27 @@ export function SettingsView({
   displayName,
   email,
   photoURL,
+  installState,
   onPreferencesChange,
   onSignOut,
+  onInstall,
+  onNotify,
 }: SettingsViewProps) {
+  const [showInstallHelp, setShowInstallHelp] = useState(false)
+  const [installing, setInstalling] = useState(false)
+
+  const handleInstall = async () => {
+    if (installState === 'installed') return
+    if (installState === 'manual') {
+      setShowInstallHelp((shown) => !shown)
+      return
+    }
+    setInstalling(true)
+    const accepted = await onInstall()
+    setInstalling(false)
+    onNotify(accepted ? '轻任务已加入设备' : '已取消安装')
+  }
+
   return (
     <section className="settings-view" aria-labelledby="settings-title">
       <header className="view-heading">
@@ -52,8 +75,32 @@ export function SettingsView({
         </section>
 
         <section className="settings-section install-section">
-          <div className="settings-section-heading"><Download /><div><h2>安装到设备</h2><p>可从浏览器菜单将轻任务安装为独立应用。</p></div></div>
-          <p className="muted-copy">安装后可从桌面或主屏幕打开，并在网络不稳定时继续访问应用界面。</p>
+          <div className="settings-section-heading"><Download /><div><h2>安装到设备</h2><p>像原生应用一样从桌面或主屏幕打开。</p></div></div>
+          <p className="muted-copy">安装后拥有独立窗口和应用图标，网络不稳定时仍可打开应用界面。</p>
+          <button
+            type="button"
+            className={installState === 'available' ? 'primary-button install-button' : 'secondary-button install-button'}
+            disabled={installState === 'installed' || installing}
+            onClick={() => void handleInstall()}
+          >
+            {installState === 'installed' ? <CheckCircle2 /> : <Download />}
+            {installState === 'installed'
+              ? '已安装到设备'
+              : installing
+                ? '正在打开安装…'
+                : installState === 'available'
+                  ? '安装轻任务'
+                  : showInstallHelp
+                    ? '收起安装方法'
+                    : '查看安装方法'}
+          </button>
+          {showInstallHelp && installState === 'manual' && (
+            <div className="install-help" role="status">
+              <strong>通过浏览器完成安装</strong>
+              <p>iPhone / iPad：使用 Safari 打开，点击“分享”，再选择“添加到主屏幕”。</p>
+              <p>Android / 电脑：打开浏览器菜单，选择“安装应用”或“添加到主屏幕”。</p>
+            </div>
+          )}
         </section>
       </div>
     </section>
