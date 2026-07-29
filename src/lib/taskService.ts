@@ -34,6 +34,7 @@ function mapTask(id: string, data: DocumentData): Task {
   return {
     id,
     title: String(data.title ?? ''),
+    description: String(data.description ?? ''),
     startDate: String(data.startDate ?? ''),
     endDate: String(data.endDate ?? ''),
     type: data.type === 'progress' ? 'progress' : 'single',
@@ -110,7 +111,7 @@ export async function createTask(
 export async function updateTaskInfo(
   userId: string,
   taskId: string,
-  fields: Pick<Task, 'title' | 'startDate' | 'endDate' | 'targetCount'>,
+  fields: Pick<Task, 'title' | 'description' | 'startDate' | 'endDate' | 'targetCount'>,
 ) {
   const reference = taskRef(userId, taskId)
   await runTransaction(db, async (transaction) => {
@@ -124,6 +125,7 @@ export async function updateTaskInfo(
     const nextCount = current.type === 'progress' ? Math.min(current.count, targetCount) : 0
     const next = {
       title: fields.title.trim().slice(0, 120),
+      description: fields.description.trim().slice(0, 2000),
       startDate: fields.startDate,
       endDate: fields.endDate,
       targetCount,
@@ -138,6 +140,9 @@ export async function updateTaskInfo(
     }> = []
     if (current.title !== next.title) {
       changes.push({ action: '修改任务名称', before: current.title, after: next.title })
+    }
+    if (current.description !== next.description) {
+      changes.push({ action: '修改任务描述', before: current.description, after: next.description })
     }
     if (current.startDate !== next.startDate) {
       changes.push({ action: '修改开始时间', before: current.startDate, after: next.startDate })

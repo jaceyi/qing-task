@@ -15,7 +15,12 @@ export function filterAndSortTasks(
   const normalizedSearch = searchTerm.trim().toLocaleLowerCase('zh-CN')
   return tasks
     .filter((task) => taskOverlapsScope(task, scope, reference))
-    .filter((task) => !normalizedSearch || task.title.toLocaleLowerCase('zh-CN').includes(normalizedSearch))
+    .filter(
+      (task) =>
+        !normalizedSearch ||
+        task.title.toLocaleLowerCase('zh-CN').includes(normalizedSearch) ||
+        task.description.toLocaleLowerCase('zh-CN').includes(normalizedSearch),
+    )
     .filter((task) => !hideCompleted || !isTaskComplete(task))
     .sort((a, b) => {
       const completionDifference = Number(isTaskComplete(a)) - Number(isTaskComplete(b))
@@ -26,10 +31,12 @@ export function filterAndSortTasks(
 
 export function normalizeTaskDraft(draft: TaskDraft): TaskDraft {
   const title = draft.title.trim().slice(0, 120)
+  const description = draft.description.trim().slice(0, 2000)
   if (draft.type === 'single') {
     return {
       ...draft,
       title,
+      description,
       count: 0,
       targetCount: 0,
     }
@@ -39,6 +46,7 @@ export function normalizeTaskDraft(draft: TaskDraft): TaskDraft {
   return {
     ...draft,
     title,
+    description,
     targetCount,
     count: Math.min(targetCount, Math.max(0, Math.round(draft.count || 0))),
     completed: false,

@@ -61,6 +61,8 @@ function App() {
   const [toast, setToast] = useState('')
   const [online, setOnline] = useState(navigator.onLine)
   const toastTimer = useRef<number | undefined>(undefined)
+  const mobileSearchRef = useRef<HTMLDivElement>(null)
+  const mobileSearchButtonRef = useRef<HTMLButtonElement>(null)
   const selectedTaskId = route.name === 'task-detail' ? route.taskId : null
   const selectedTask = useMemo(
     () => taskData.tasks.find((task) => task.id === selectedTaskId) ?? null,
@@ -98,6 +100,34 @@ function App() {
     const main = document.querySelector<HTMLElement>('.main-content')
     main?.scrollTo({ top: 0 })
   }, [route])
+
+  useEffect(() => {
+    if (route.name !== 'board') setMobileSearchOpen(false)
+  }, [route.name])
+
+  useEffect(() => {
+    if (!mobileSearchOpen) return
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (
+        !mobileSearchRef.current?.contains(target) &&
+        !mobileSearchButtonRef.current?.contains(target)
+      ) {
+        setMobileSearchOpen(false)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileSearchOpen(false)
+    }
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [mobileSearchOpen])
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
@@ -171,10 +201,6 @@ function App() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-note">
-          <span className="note-line" />
-          <p>时间只决定<br />任务是否显示</p>
-        </div>
       </aside>
 
       <header className="topbar">
@@ -185,17 +211,28 @@ function App() {
           <span className="brand-mark"><Check /></span>
           <strong>{selectedTask ? '任务详情' : settingsOpen ? '设置' : `${scopeLabels[boardScope]}任务`}</strong>
         </div>
-        <div className={`search-box ${mobileSearchOpen ? 'is-open' : ''}`}>
-          <Search />
-          <input
-            aria-label="搜索任务"
-            placeholder="搜索任务"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-          />
-          {searchTerm && <button type="button" aria-label="清空搜索" onClick={() => setSearchTerm('')}><X /></button>}
-        </div>
-        <button type="button" className="icon-button mobile-search-button" aria-label="搜索" onClick={() => setMobileSearchOpen((open) => !open)}><Search /></button>
+        {route.name === 'board' && (
+          <>
+            <div ref={mobileSearchRef} className={`search-box ${mobileSearchOpen ? 'is-open' : ''}`}>
+              <Search />
+              <input
+                aria-label="搜索任务"
+                placeholder="搜索任务"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+              />
+              {searchTerm && <button type="button" aria-label="清空搜索" onClick={() => setSearchTerm('')}><X /></button>}
+            </div>
+            <button
+              ref={mobileSearchButtonRef}
+              type="button"
+              className="icon-button mobile-search-button"
+              aria-label="搜索"
+              aria-expanded={mobileSearchOpen}
+              onClick={() => setMobileSearchOpen((open) => !open)}
+            ><Search /></button>
+          </>
+        )}
         <button type="button" className="primary-button top-create-button" onClick={() => navigate({ name: 'task-new' }, { fromScope: boardScope })}><Plus /> 新建任务</button>
         <div className="profile-menu-wrap">
           <button type="button" className="profile-button" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)}>

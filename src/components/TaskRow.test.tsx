@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Task } from '../types'
 import { TaskRow } from './TaskRow'
@@ -6,6 +6,7 @@ import { TaskRow } from './TaskRow'
 const singleTask: Task = {
   id: 'single-1',
   title: '测试普通任务',
+  description: '',
   startDate: '2026-07-28T09:00',
   endDate: '2026-07-28T10:00',
   type: 'single',
@@ -49,5 +50,23 @@ describe('任务行手势', () => {
 
     expect(screen.queryByRole('button', { name: '进度减一' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '进度加一' })).not.toBeInTheDocument()
+  })
+
+  it('向右拖动时只显示浅绿色完成底层', () => {
+    const { container } = render(
+      <TaskRow
+        task={singleTask}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => true)}
+        onNotify={vi.fn()}
+      />,
+    )
+
+    const row = within(container).getByRole('button', { name: '打开任务：测试普通任务' })
+    fireEvent.pointerDown(row, { clientX: 100, clientY: 100, pointerId: 1 })
+    fireEvent.pointerMove(row, { clientX: 140, clientY: 102, pointerId: 1 })
+
+    expect(container.querySelector('.task-row-wrap')).toHaveClass('is-swiping-positive')
+    expect(container.querySelector('.task-row-wrap')).not.toHaveClass('is-swiping-negative')
   })
 })

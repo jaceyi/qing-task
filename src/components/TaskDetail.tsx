@@ -22,7 +22,7 @@ interface TaskDetailProps {
   onBack: () => void
   onCopy: () => void
   onSave: (
-    fields: Pick<Task, 'title' | 'startDate' | 'endDate' | 'targetCount'>,
+    fields: Pick<Task, 'title' | 'description' | 'startDate' | 'endDate' | 'targetCount'>,
   ) => Promise<void>
   onChangeType: (nextType: TaskType, targetCount?: number) => Promise<void>
   onSetCompleted: (completed: boolean) => Promise<boolean>
@@ -58,6 +58,7 @@ export function TaskDetail({
   onNotify,
 }: TaskDetailProps) {
   const [title, setTitle] = useState(task.title)
+  const [description, setDescription] = useState(task.description)
   const [startDate, setStartDate] = useState(() => normalizeDateTimeInput(task.startDate, 'start'))
   const [endDate, setEndDate] = useState(() => normalizeDateTimeInput(task.endDate, 'end'))
   const [targetCount, setTargetCount] = useState(task.targetCount || 5)
@@ -70,6 +71,7 @@ export function TaskDetail({
 
   useEffect(() => {
     setTitle(task.title)
+    setDescription(task.description)
     setStartDate(normalizeDateTimeInput(task.startDate, 'start'))
     setEndDate(normalizeDateTimeInput(task.endDate, 'end'))
     setTargetCount(task.targetCount || 5)
@@ -83,7 +85,7 @@ export function TaskDetail({
     setSaving(true)
     setError('')
     try {
-      await onSave({ title, startDate, endDate, targetCount })
+      await onSave({ title, description, startDate, endDate, targetCount })
       onNotify('任务信息已保存')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '保存失败')
@@ -154,6 +156,16 @@ export function TaskDetail({
                 <span>任务名称</span>
                 <input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} />
               </label>
+              <label className="field-group full-width">
+                <span>任务描述 <small>可选</small></span>
+                <textarea
+                  value={description}
+                  maxLength={2000}
+                  rows={4}
+                  placeholder="补充任务背景、要求或完成标准"
+                  onChange={(event) => setDescription(event.target.value)}
+                />
+              </label>
               <label className="field-group">
                 <span>开始时间</span>
                 <input type="datetime-local" step="60" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
@@ -201,7 +213,7 @@ export function TaskDetail({
             </div>
 
             {confirmTypeChange && (
-              <div className="inline-confirm" role="alert">
+              <div className={`inline-confirm ${confirmTypeChange === 'progress' ? 'has-target' : ''}`} role="alert">
                 <div>
                   <strong>{confirmTypeChange === 'progress' ? '切换为进度任务？' : '切换为普通任务？'}</strong>
                   <p>

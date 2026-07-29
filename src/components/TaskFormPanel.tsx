@@ -17,6 +17,7 @@ function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
   if (!sourceTask) {
     return {
       title: '',
+      description: '',
       startDate: startTime,
       endDate: endTime,
       type: 'single',
@@ -27,6 +28,7 @@ function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
   }
   return {
     title: `${sourceTask.title}（副本）`,
+    description: sourceTask.description,
     startDate: normalizeDateTimeInput(sourceTask.startDate, 'start'),
     endDate: normalizeDateTimeInput(sourceTask.endDate, 'end'),
     type: sourceTask.type,
@@ -102,6 +104,17 @@ export function TaskFormPanel({ sourceTask, onClose, onSubmit }: TaskFormPanelPr
               maxLength={120}
               placeholder="例如：完成项目方案"
               onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+            />
+          </label>
+
+          <label className="field-group">
+            <span>任务描述 <small>可选</small></span>
+            <textarea
+              value={draft.description}
+              maxLength={2000}
+              rows={4}
+              placeholder="补充任务背景、要求或完成标准"
+              onChange={(event) => setDraft({ ...draft, description: event.target.value })}
             />
           </label>
 

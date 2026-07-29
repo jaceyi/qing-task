@@ -117,7 +117,11 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
   }
 
   return (
-    <div className={`task-row-wrap ${complete ? 'is-complete' : ''}`}>
+    <div
+      className={`task-row-wrap ${complete ? 'is-complete' : ''} ${
+        offset > 0 ? 'is-swiping-positive' : offset < 0 ? 'is-swiping-negative' : ''
+      }`}
+    >
       <div className="swipe-underlay swipe-underlay-positive" aria-hidden="true">
         {task.type === 'single' ? <Check /> : <Plus />}
         <span>{task.type === 'single' ? '完成' : '+1'}</span>

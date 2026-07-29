@@ -5,6 +5,7 @@ import type { Task } from '../types'
 const baseTask: Task = {
   id: 'task-1',
   title: '测试任务',
+  description: '任务描述',
   startDate: '2026-07-28',
   endDate: '2026-07-28',
   type: 'progress',
@@ -36,11 +37,18 @@ describe('任务状态逻辑', () => {
       normalizeTaskDraft({
         ...baseTask,
         title: '  新任务  ',
+        description: '  补充说明  ',
         targetCount: 3,
         count: 10,
         completed: true,
       }),
-    ).toMatchObject({ title: '新任务', targetCount: 3, count: 3, completed: false })
+    ).toMatchObject({
+      title: '新任务',
+      description: '补充说明',
+      targetCount: 3,
+      count: 3,
+      completed: false,
+    })
   })
 
   it('从进度任务切换到普通任务时，仅在到达目标后标记完成', () => {

@@ -12,6 +12,7 @@ export const demoTasks: Task[] = [
   {
     id: 'demo-1',
     title: '写完产品方案',
+    description: '整理目标、核心流程与本周交付范围。',
     startDate: date(0, 9),
     endDate: date(0, 17, 30),
     type: 'progress',
@@ -24,6 +25,7 @@ export const demoTasks: Task[] = [
   {
     id: 'demo-2',
     title: '晨间运动',
+    description: '完成拉伸、核心训练和慢跑。',
     startDate: date(-2, 7),
     endDate: date(3, 8),
     type: 'progress',
@@ -36,6 +38,7 @@ export const demoTasks: Task[] = [
   {
     id: 'demo-3',
     title: '阅读 30 分钟',
+    description: '',
     startDate: date(0, 19),
     endDate: date(0, 19, 30),
     type: 'single',
@@ -48,6 +51,7 @@ export const demoTasks: Task[] = [
   {
     id: 'demo-4',
     title: '整理会议纪要',
+    description: '提炼结论、负责人和截止时间。',
     startDate: date(0, 14),
     endDate: date(1, 10),
     type: 'single',
@@ -60,6 +64,7 @@ export const demoTasks: Task[] = [
   {
     id: 'demo-5',
     title: '背单词',
+    description: '',
     startDate: date(-4, 8),
     endDate: date(0, 22),
     type: 'progress',
@@ -72,6 +77,7 @@ export const demoTasks: Task[] = [
   {
     id: 'demo-6',
     title: '整理桌面',
+    description: '',
     startDate: date(0, 11),
     endDate: date(0, 11, 15),
     type: 'single',
