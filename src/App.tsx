@@ -62,7 +62,9 @@ function App() {
   const [online, setOnline] = useState(navigator.onLine)
   const toastTimer = useRef<number | undefined>(undefined)
   const mobileSearchRef = useRef<HTMLDivElement>(null)
+  const mobileSearchInputRef = useRef<HTMLInputElement>(null)
   const mobileSearchButtonRef = useRef<HTMLButtonElement>(null)
+  const profileMenuRef = useRef<HTMLDivElement>(null)
   const selectedTaskId = route.name === 'task-detail' ? route.taskId : null
   const selectedTask = useMemo(
     () => taskData.tasks.find((task) => task.id === selectedTaskId) ?? null,
@@ -108,6 +110,11 @@ function App() {
   useEffect(() => {
     if (!mobileSearchOpen) return
 
+    mobileSearchInputRef.current?.focus({ preventScroll: true })
+    const focusTimer = window.setTimeout(() => {
+      mobileSearchInputRef.current?.focus({ preventScroll: true })
+    }, 80)
+
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target as Node
       if (
@@ -124,10 +131,29 @@ function App() {
     document.addEventListener('pointerdown', closeOnOutsidePointer)
     document.addEventListener('keydown', closeOnEscape)
     return () => {
+      window.clearTimeout(focusTimer)
       document.removeEventListener('pointerdown', closeOnOutsidePointer)
       document.removeEventListener('keydown', closeOnEscape)
     }
   }, [mobileSearchOpen])
+
+  useEffect(() => {
+    if (!profileOpen) return
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!profileMenuRef.current?.contains(event.target as Node)) setProfileOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProfileOpen(false)
+    }
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [profileOpen])
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
@@ -216,6 +242,7 @@ function App() {
             <div ref={mobileSearchRef} className={`search-box ${mobileSearchOpen ? 'is-open' : ''}`}>
               <Search />
               <input
+                ref={mobileSearchInputRef}
                 aria-label="搜索任务"
                 placeholder="搜索任务"
                 value={searchTerm}
@@ -234,7 +261,7 @@ function App() {
           </>
         )}
         <button type="button" className="primary-button top-create-button" onClick={() => navigate({ name: 'task-new' }, { fromScope: boardScope })}><Plus /> 新建任务</button>
-        <div className="profile-menu-wrap">
+        <div ref={profileMenuRef} className="profile-menu-wrap">
           <button type="button" className="profile-button" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)}>
             <span className="avatar">
               {user?.photoURL ? <img src={user.photoURL} alt="" referrerPolicy="no-referrer" /> : avatarText}
@@ -244,8 +271,14 @@ function App() {
           {profileOpen && (
             <div className="profile-popover">
               <div><strong>{displayName}</strong><small>{email}</small></div>
-              <button type="button" onClick={() => navigate({ name: 'settings' }, { fromScope: boardScope })}><Settings /> 设置</button>
-              {!demoMode && <button type="button" onClick={() => void signOut(auth)}><LogOut /> 退出登录</button>}
+              <button type="button" onClick={() => {
+                setProfileOpen(false)
+                navigate({ name: 'settings' }, { fromScope: boardScope })
+              }}><Settings /> 设置</button>
+              {!demoMode && <button type="button" onClick={() => {
+                setProfileOpen(false)
+                void signOut(auth)
+              }}><LogOut /> 退出登录</button>}
             </div>
           )}
         </div>
@@ -307,8 +340,8 @@ function App() {
         <aside className="utility-panel">
           <section>
             <div className="utility-title"><SlidersHorizontal /><h2>操作方式</h2></div>
-            <div className="gesture-guide positive"><span><ArrowRight /></span><p><strong>向右拖动</strong><small>完成任务或进度 +1</small></p></div>
-            <div className="gesture-guide negative"><span><ArrowLeft /></span><p><strong>向左拖动</strong><small>撤销完成或进度 −1</small></p></div>
+            <div className="gesture-guide positive"><span><ArrowRight /></span><p><strong>向右拖动</strong><small>完成任务或推进一次</small></p></div>
+            <div className="gesture-guide negative"><span><ArrowLeft /></span><p><strong>向左拖动</strong><small>取消完成或回退一次</small></p></div>
           </section>
           <section>
             <label className="utility-toggle">

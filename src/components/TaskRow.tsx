@@ -1,5 +1,5 @@
 import { useRef, useState, type PointerEvent } from 'react'
-import { Check, Minus, Plus } from 'lucide-react'
+import { Check, CircleMinus, CirclePlus, Minus, Plus, Square } from 'lucide-react'
 import { formatDateRange } from '../lib/date'
 import { isTaskComplete } from '../lib/taskLogic'
 import type { Task } from '../types'
@@ -113,12 +113,12 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
       }`}
     >
       <div className="swipe-underlay swipe-underlay-positive" aria-hidden="true">
-        {task.type === 'single' ? <Check /> : <Plus />}
-        <span>{task.type === 'single' ? '完成' : '+1'}</span>
+        {task.type === 'single' ? <Check /> : <CirclePlus />}
+        <span>{task.type === 'single' ? '完成' : '推进一次'}</span>
       </div>
       <div className="swipe-underlay swipe-underlay-negative" aria-hidden="true">
-        {task.type === 'single' ? <Check /> : <Minus />}
-        <span>{task.type === 'single' ? '撤销' : '−1'}</span>
+        {task.type === 'single' ? <Square /> : <CircleMinus />}
+        <span>{task.type === 'single' ? '取消完成' : '回退一次'}</span>
       </div>
       <div
         className={`task-row is-${task.type}`}
@@ -147,23 +147,36 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
         ) : (
           <span
             className={`task-progress-indicator ${complete ? 'is-complete' : ''}`}
-            style={{ background: `conic-gradient(var(--mint) ${progress}%, #e8e8f0 ${progress}% 100%)` }}
             role="img"
             aria-label={`当前进度 ${task.count}/${task.targetCount}`}
           >
-            <span>{complete && <Check />}</span>
+            <svg viewBox="0 0 26 26" aria-hidden="true">
+              <circle className="task-progress-ring-track" cx="13" cy="13" r="10" pathLength="100" />
+              <circle
+                className="task-progress-ring-value"
+                cx="13"
+                cy="13"
+                r="10"
+                pathLength="100"
+                strokeDasharray="100"
+                strokeDashoffset={100 - progress}
+              />
+            </svg>
+            <span className="task-progress-center">{complete && <Check />}</span>
           </span>
         )}
 
-        <button
-          type="button"
-          className="task-copy task-detail-trigger"
-          aria-label={`打开任务：${task.title}`}
-          onClick={handleOpen}
-        >
-          <span className="task-title">{task.title}</span>
-          <span className="task-date">{formatDateRange(task.startDate, task.endDate)}</span>
-        </button>
+        <span className="task-copy-cell">
+          <button
+            type="button"
+            className="task-copy task-detail-trigger"
+            aria-label={`打开任务：${task.title}`}
+            onClick={handleOpen}
+          >
+            <span className="task-title">{task.title}</span>
+            <span className="task-date">{formatDateRange(task.startDate, task.endDate)}</span>
+          </button>
+        </span>
 
         <span className="task-status">
           {task.type === 'progress' ? (

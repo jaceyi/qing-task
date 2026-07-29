@@ -84,6 +84,34 @@ describe('任务行手势', () => {
     expect(container.querySelector('.lucide-arrow-left')).not.toBeInTheDocument()
   })
 
+  it('使用清晰的拖拽动作语义', () => {
+    const { container, rerender } = render(
+      <TaskRow
+        task={progressTask}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => true)}
+        onNotify={vi.fn()}
+      />,
+    )
+
+    expect(container.querySelector('.swipe-underlay-positive')).toHaveTextContent('推进一次')
+    expect(container.querySelector('.swipe-underlay-positive .lucide-circle-plus')).toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-negative')).toHaveTextContent('回退一次')
+    expect(container.querySelector('.swipe-underlay-negative .lucide-circle-minus')).toBeInTheDocument()
+
+    rerender(
+      <TaskRow
+        task={{ ...singleTask, completed: true }}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => true)}
+        onNotify={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('.swipe-underlay-negative')).toHaveTextContent('取消完成')
+    expect(container.querySelector('.swipe-underlay-negative .lucide-square')).toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-negative .lucide-check')).not.toBeInTheDocument()
+  })
+
   it('进度任务使用不可点击的环形进度标识', () => {
     const onOpen = vi.fn()
     const { container } = render(
@@ -115,8 +143,14 @@ describe('任务行手势', () => {
     )
 
     const row = container.querySelector('.task-row')
+    const copyCell = container.querySelector('.task-copy-cell')
+    const status = container.querySelector('.task-status')
     expect(row).not.toBeNull()
+    expect(copyCell).not.toBeNull()
+    expect(status).not.toBeNull()
     fireEvent.click(row!)
+    fireEvent.click(copyCell!)
+    fireEvent.click(status!)
     expect(onOpen).not.toHaveBeenCalled()
 
     fireEvent.click(within(container).getByRole('button', { name: '进度加一' }))
@@ -124,5 +158,32 @@ describe('任务行手势', () => {
 
     await userEvent.click(within(container).getByRole('button', { name: '打开任务：测试进度任务' }))
     expect(onOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it('用可动画的 SVG 环表达进度', () => {
+    const { container, rerender } = render(
+      <TaskRow
+        task={progressTask}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => true)}
+        onNotify={vi.fn()}
+      />,
+    )
+
+    const ring = container.querySelector('.task-progress-ring-value')
+    const bar = container.querySelector<HTMLElement>('.progress-track > span')
+    expect(ring).toHaveAttribute('stroke-dashoffset', '60')
+    expect(bar).toHaveStyle({ width: '40%' })
+
+    rerender(
+      <TaskRow
+        task={{ ...progressTask, count: 3 }}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => true)}
+        onNotify={vi.fn()}
+      />,
+    )
+    expect(ring).toHaveAttribute('stroke-dashoffset', '40')
+    expect(bar).toHaveStyle({ width: '60%' })
   })
 })

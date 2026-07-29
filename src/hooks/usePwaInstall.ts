@@ -5,6 +5,12 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
 }
 
+declare global {
+  interface Window {
+    __lightTaskInstallPrompt?: BeforeInstallPromptEvent | null
+  }
+}
+
 export type PwaInstallState = 'available' | 'installed' | 'manual'
 
 function isStandalone() {
@@ -16,22 +22,32 @@ function isStandalone() {
 }
 
 export function usePwaInstall() {
-  const [promptEvent, setPromptEvent] = useState<BeforeInstallPromptEvent | null>(null)
+  const [promptEvent, setPromptEvent] = useState<BeforeInstallPromptEvent | null>(
+    () => window.__lightTaskInstallPrompt ?? null,
+  )
   const [installed, setInstalled] = useState(isStandalone)
 
   useEffect(() => {
     const handlePrompt = (event: Event) => {
       event.preventDefault()
-      setPromptEvent(event as BeforeInstallPromptEvent)
+      const installPrompt = event as BeforeInstallPromptEvent
+      window.__lightTaskInstallPrompt = installPrompt
+      setPromptEvent(installPrompt)
+    }
+    const handleCapturedPrompt = () => {
+      setPromptEvent(window.__lightTaskInstallPrompt ?? null)
     }
     const handleInstalled = () => {
       setInstalled(true)
+      window.__lightTaskInstallPrompt = null
       setPromptEvent(null)
     }
     window.addEventListener('beforeinstallprompt', handlePrompt)
+    window.addEventListener('light-task-install-available', handleCapturedPrompt)
     window.addEventListener('appinstalled', handleInstalled)
     return () => {
       window.removeEventListener('beforeinstallprompt', handlePrompt)
+      window.removeEventListener('light-task-install-available', handleCapturedPrompt)
       window.removeEventListener('appinstalled', handleInstalled)
     }
   }, [])
@@ -40,7 +56,8 @@ export function usePwaInstall() {
     if (!promptEvent) return false
     await promptEvent.prompt()
     const choice = await promptEvent.userChoice
-    if (choice.outcome === 'accepted') setPromptEvent(null)
+    window.__lightTaskInstallPrompt = null
+    setPromptEvent(null)
     return choice.outcome === 'accepted'
   }, [promptEvent])
 

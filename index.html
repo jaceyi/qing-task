@@ -14,6 +14,17 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      window.__lightTaskInstallPrompt = null
+      window.addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault()
+        window.__lightTaskInstallPrompt = event
+        window.dispatchEvent(new Event('light-task-install-available'))
+      })
+      window.addEventListener('appinstalled', () => {
+        window.__lightTaskInstallPrompt = null
+      })
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
