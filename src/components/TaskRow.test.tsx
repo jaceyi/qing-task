@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Task } from '../types'
 import { TaskRow } from './TaskRow'
@@ -17,10 +18,19 @@ const singleTask: Task = {
   updatedAt: new Date(),
 }
 
+const progressTask: Task = {
+  ...singleTask,
+  id: 'progress-1',
+  title: '测试进度任务',
+  type: 'progress',
+  targetCount: 5,
+  count: 2,
+}
+
 describe('任务行手势', () => {
   it('未完成普通任务向左滑动无效，并自动回到原位', async () => {
     const onAction = vi.fn(async () => false)
-    render(
+    const { container } = render(
       <TaskRow
         task={singleTask}
         onOpen={vi.fn()}
@@ -29,17 +39,18 @@ describe('任务行手势', () => {
       />,
     )
 
-    const row = screen.getByRole('button', { name: '打开任务：测试普通任务' })
-    fireEvent.pointerDown(row, { clientX: 220, clientY: 100, pointerId: 1 })
-    fireEvent.pointerMove(row, { clientX: 120, clientY: 102, pointerId: 1 })
-    fireEvent.pointerUp(row, { clientX: 120, clientY: 102, pointerId: 1 })
+    const row = container.querySelector<HTMLElement>('.task-row')
+    expect(row).not.toBeNull()
+    fireEvent.pointerDown(row!, { clientX: 220, clientY: 100, pointerId: 1 })
+    fireEvent.pointerMove(row!, { clientX: 120, clientY: 102, pointerId: 1 })
+    fireEvent.pointerUp(row!, { clientX: 120, clientY: 102, pointerId: 1 })
 
     await waitFor(() => expect(row).toHaveStyle({ transform: 'translateX(0px)' }))
     expect(onAction).not.toHaveBeenCalled()
   })
 
   it('普通任务不渲染右侧加减按钮', () => {
-    render(
+    const { container } = render(
       <TaskRow
         task={singleTask}
         onOpen={vi.fn()}
@@ -48,8 +59,9 @@ describe('任务行手势', () => {
       />,
     )
 
-    expect(screen.queryByRole('button', { name: '进度减一' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '进度加一' })).not.toBeInTheDocument()
+    expect(within(container).queryByRole('button', { name: '进度减一' })).not.toBeInTheDocument()
+    expect(within(container).queryByRole('button', { name: '进度加一' })).not.toBeInTheDocument()
+    expect(within(container).getByRole('button', { name: '完成任务：测试普通任务' })).toBeInTheDocument()
   })
 
   it('向右拖动时只显示浅绿色完成底层', () => {
@@ -68,5 +80,49 @@ describe('任务行手势', () => {
 
     expect(container.querySelector('.task-row-wrap')).toHaveClass('is-swiping-positive')
     expect(container.querySelector('.task-row-wrap')).not.toHaveClass('is-swiping-negative')
+    expect(container.querySelector('.lucide-arrow-right')).not.toBeInTheDocument()
+    expect(container.querySelector('.lucide-arrow-left')).not.toBeInTheDocument()
+  })
+
+  it('进度任务使用不可点击的环形进度标识', () => {
+    const onOpen = vi.fn()
+    const { container } = render(
+      <TaskRow
+        task={progressTask}
+        onOpen={onOpen}
+        onAction={vi.fn(async () => true)}
+        onNotify={vi.fn()}
+      />,
+    )
+
+    const progressIndicator = within(container).getByRole('img', { name: '当前进度 2/5' })
+    expect(progressIndicator.tagName).toBe('SPAN')
+    expect(within(container).queryByRole('button', { name: '完成任务：测试进度任务' })).not.toBeInTheDocument()
+
+    fireEvent.click(progressIndicator)
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('仅标题和时间内容区可以打开详情', async () => {
+    const onOpen = vi.fn()
+    const { container } = render(
+      <TaskRow
+        task={progressTask}
+        onOpen={onOpen}
+        onAction={vi.fn(async () => true)}
+        onNotify={vi.fn()}
+      />,
+    )
+
+    const row = container.querySelector('.task-row')
+    expect(row).not.toBeNull()
+    fireEvent.click(row!)
+    expect(onOpen).not.toHaveBeenCalled()
+
+    fireEvent.click(within(container).getByRole('button', { name: '进度加一' }))
+    expect(onOpen).not.toHaveBeenCalled()
+
+    await userEvent.click(within(container).getByRole('button', { name: '打开任务：测试进度任务' }))
+    expect(onOpen).toHaveBeenCalledTimes(1)
   })
 })
