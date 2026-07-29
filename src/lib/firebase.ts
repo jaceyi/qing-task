@@ -9,9 +9,14 @@ import {
 } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 
+const defaultAuthDomain =
+  window.location.hostname === 'task.jaceyi.com'
+    ? 'task.jaceyi.com'
+    : 'task-914de.firebaseapp.com'
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCgvfqRrrpWn7wlwX2MXGmgs3jwpe-F2Kg',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'task-914de.firebaseapp.com',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || defaultAuthDomain,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'task-914de',
   storageBucket:
     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'task-914de.firebasestorage.app',

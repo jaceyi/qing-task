@@ -5,6 +5,7 @@ export type TaskLogType = 'update' | 'progress'
 export interface Task {
   id: string
   title: string
+  description: string
   startDate: string
   endDate: string
   type: TaskType
@@ -17,7 +18,7 @@ export interface Task {
 
 export type TaskDraft = Pick<
   Task,
-  'title' | 'startDate' | 'endDate' | 'type' | 'targetCount' | 'count' | 'completed'
+  'title' | 'description' | 'startDate' | 'endDate' | 'type' | 'targetCount' | 'count' | 'completed'
 >
 
 export interface TaskLog {

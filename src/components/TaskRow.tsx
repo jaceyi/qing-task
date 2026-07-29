@@ -1,11 +1,5 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  Minus,
-  Plus,
-} from 'lucide-react'
+import { useRef, useState, type PointerEvent } from 'react'
+import { Check, CircleMinus, CirclePlus, Minus, Plus, Square } from 'lucide-react'
 import { formatDateRange } from '../lib/date'
 import { isTaskComplete } from '../lib/taskLogic'
 import type { Task } from '../types'
@@ -62,7 +56,8 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
   }
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest('button')) return
+    const button = (event.target as HTMLElement).closest('button')
+    if (button && !button.classList.contains('task-detail-trigger')) return
     gesture.current = {
       startX: event.clientX,
       startY: event.clientY,
@@ -71,7 +66,6 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
       active: true,
       lastOffset: 0,
     }
-    event.currentTarget.setPointerCapture?.(event.pointerId)
   }
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
@@ -82,6 +76,9 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
     if (Math.abs(deltaX) > 6) {
       gesture.current.dragged = true
       gesture.current.horizontal = true
+      if (!event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+        event.currentTarget.setPointerCapture?.(event.pointerId)
+      }
       const nextOffset = Math.max(-88, Math.min(88, deltaX))
       gesture.current.lastOffset = nextOffset
       setOffset(nextOffset)
@@ -109,30 +106,22 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
     onOpen()
   }
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault()
-      onOpen()
-    }
-  }
-
   return (
-    <div className={`task-row-wrap ${complete ? 'is-complete' : ''}`}>
+    <div
+      className={`task-row-wrap ${complete ? 'is-complete' : ''} ${
+        offset > 0 ? 'is-swiping-positive' : offset < 0 ? 'is-swiping-negative' : ''
+      }`}
+    >
       <div className="swipe-underlay swipe-underlay-positive" aria-hidden="true">
-        {task.type === 'single' ? <Check /> : <Plus />}
-        <span>{task.type === 'single' ? '完成' : '+1'}</span>
-        <ArrowRight />
+        {task.type === 'single' ? <Check /> : <CirclePlus />}
+        <span>{task.type === 'single' ? '完成' : '推进一次'}</span>
       </div>
       <div className="swipe-underlay swipe-underlay-negative" aria-hidden="true">
-        <ArrowLeft />
-        <span>{task.type === 'single' ? '撤销' : '−1'}</span>
-        {task.type === 'single' ? <Check /> : <Minus />}
+        {task.type === 'single' ? <Square /> : <CircleMinus />}
+        <span>{task.type === 'single' ? '取消完成' : '回退一次'}</span>
       </div>
       <div
         className={`task-row is-${task.type}`}
-        role="button"
-        tabIndex={0}
-        aria-label={`打开任务：${task.title}`}
         style={{ transform: `translateX(${offset}px)` }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -142,24 +131,51 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
           gesture.current.lastOffset = 0
           setOffset(0)
         }}
-        onClick={handleOpen}
-        onKeyDown={handleKeyDown}
       >
-        <button
-          className={`task-check ${complete ? 'is-checked' : ''}`}
-          type="button"
-          aria-label={complete ? `撤销完成：${task.title}` : `推进任务：${task.title}`}
-          onClick={(event) => {
-            event.stopPropagation()
-            void performAction(complete ? 'negative' : 'positive')
-          }}
-        >
-          {complete && <Check />}
-        </button>
+        {task.type === 'single' ? (
+          <button
+            className={`task-check ${complete ? 'is-checked' : ''}`}
+            type="button"
+            aria-label={complete ? `撤销完成：${task.title}` : `完成任务：${task.title}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              void performAction(complete ? 'negative' : 'positive')
+            }}
+          >
+            {complete && <Check />}
+          </button>
+        ) : (
+          <span
+            className={`task-progress-indicator ${complete ? 'is-complete' : ''}`}
+            role="img"
+            aria-label={`当前进度 ${task.count}/${task.targetCount}`}
+          >
+            <svg viewBox="0 0 26 26" aria-hidden="true">
+              <circle className="task-progress-ring-track" cx="13" cy="13" r="10" pathLength="100" />
+              <circle
+                className="task-progress-ring-value"
+                cx="13"
+                cy="13"
+                r="10"
+                pathLength="100"
+                strokeDasharray="100"
+                strokeDashoffset={100 - progress}
+              />
+            </svg>
+            <span className="task-progress-center">{complete && <Check />}</span>
+          </span>
+        )}
 
-        <span className="task-copy">
-          <span className="task-title">{task.title}</span>
-          <span className="task-date">{formatDateRange(task.startDate, task.endDate)}</span>
+        <span className="task-copy-cell">
+          <button
+            type="button"
+            className="task-copy task-detail-trigger"
+            aria-label={`打开任务：${task.title}`}
+            onClick={handleOpen}
+          >
+            <span className="task-title">{task.title}</span>
+            <span className="task-date">{formatDateRange(task.startDate, task.endDate)}</span>
+          </button>
         </span>
 
         <span className="task-status">

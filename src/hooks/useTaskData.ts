@@ -82,7 +82,7 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
   const updateTask = useCallback(
     async (
       taskId: string,
-      fields: Pick<Task, 'title' | 'startDate' | 'endDate' | 'targetCount'>,
+      fields: Pick<Task, 'title' | 'description' | 'startDate' | 'endDate' | 'targetCount'>,
     ) => {
       if (!demoMode) {
         if (!userId) throw new Error('请先登录')

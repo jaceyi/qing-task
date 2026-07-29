@@ -96,9 +96,9 @@ export function SettingsView({
           </button>
           {showInstallHelp && installState === 'manual' && (
             <div className="install-help" role="status">
-              <strong>通过浏览器完成安装</strong>
+              <strong>浏览器暂未开放快捷安装</strong>
+              <p>Chrome / Edge 会按当前域名单独判断：先浏览至少 30 秒并点击页面一次，再刷新页面；也可以直接从浏览器菜单选择“安装应用”。</p>
               <p>iPhone / iPad：使用 Safari 打开，点击“分享”，再选择“添加到主屏幕”。</p>
-              <p>Android / 电脑：打开浏览器菜单，选择“安装应用”或“添加到主屏幕”。</p>
             </div>
           )}
         </section>
