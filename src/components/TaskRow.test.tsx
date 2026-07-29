@@ -84,7 +84,7 @@ describe('任务行手势', () => {
     expect(container.querySelector('.lucide-arrow-left')).not.toBeInTheDocument()
   })
 
-  it('使用清晰的拖拽动作语义', () => {
+  it('使用统一的双字拖拽动作和正负图标', () => {
     const { container, rerender } = render(
       <TaskRow
         task={progressTask}
@@ -94,10 +94,10 @@ describe('任务行手势', () => {
       />,
     )
 
-    expect(container.querySelector('.swipe-underlay-positive')).toHaveTextContent('推进一次')
-    expect(container.querySelector('.swipe-underlay-positive .lucide-circle-plus')).toBeInTheDocument()
-    expect(container.querySelector('.swipe-underlay-negative')).toHaveTextContent('回退一次')
-    expect(container.querySelector('.swipe-underlay-negative .lucide-circle-minus')).toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-positive')).toHaveTextContent('推进')
+    expect(container.querySelector('.swipe-underlay-positive .lucide-check')).toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-negative')).toHaveTextContent('回退')
+    expect(container.querySelector('.swipe-underlay-negative .lucide-x')).toBeInTheDocument()
 
     rerender(
       <TaskRow
@@ -107,8 +107,10 @@ describe('任务行手势', () => {
         onNotify={vi.fn()}
       />,
     )
-    expect(container.querySelector('.swipe-underlay-negative')).toHaveTextContent('取消完成')
-    expect(container.querySelector('.swipe-underlay-negative .lucide-square')).toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-positive')).toHaveTextContent('完成')
+    expect(container.querySelector('.swipe-underlay-positive .lucide-check')).toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-negative')).toHaveTextContent('取消')
+    expect(container.querySelector('.swipe-underlay-negative .lucide-x')).toBeInTheDocument()
     expect(container.querySelector('.swipe-underlay-negative .lucide-check')).not.toBeInTheDocument()
   })
 

@@ -1,5 +1,5 @@
 import { useRef, useState, type PointerEvent } from 'react'
-import { Check, CircleMinus, CirclePlus, Minus, Plus, Square } from 'lucide-react'
+import { Check, Minus, Plus, X } from 'lucide-react'
 import { formatDateRange } from '../lib/date'
 import { isTaskComplete } from '../lib/taskLogic'
 import type { Task } from '../types'
@@ -113,12 +113,12 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
       }`}
     >
       <div className="swipe-underlay swipe-underlay-positive" aria-hidden="true">
-        {task.type === 'single' ? <Check /> : <CirclePlus />}
-        <span>{task.type === 'single' ? '完成' : '推进一次'}</span>
+        <Check />
+        <span>{task.type === 'single' ? '完成' : '推进'}</span>
       </div>
       <div className="swipe-underlay swipe-underlay-negative" aria-hidden="true">
-        {task.type === 'single' ? <Square /> : <CircleMinus />}
-        <span>{task.type === 'single' ? '取消完成' : '回退一次'}</span>
+        <X />
+        <span>{task.type === 'single' ? '取消' : '回退'}</span>
       </div>
       <div
         className={`task-row is-${task.type}`}

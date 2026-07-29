@@ -494,6 +494,10 @@
   transition: opacity 100ms ease;
 }
 
+.swipe-underlay span {
+  white-space: nowrap;
+}
+
 .task-row-wrap.is-swiping-positive .swipe-underlay-positive,
 .task-row-wrap.is-swiping-negative .swipe-underlay-negative {
   opacity: 1;
