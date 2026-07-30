@@ -64,6 +64,20 @@ describe('任务行手势', () => {
     expect(within(container).getByRole('button', { name: '完成任务：测试普通任务' })).toBeInTheDocument()
   })
 
+  it('无时间任务使用清晰的无时间标识', () => {
+    const { container } = render(
+      <TaskRow
+        task={{ ...singleTask, startDate: '', endDate: '' }}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => false)}
+        onNotify={vi.fn()}
+      />,
+    )
+
+    expect(container.querySelector('.task-date')).toHaveTextContent('无时间')
+    expect(container.querySelector('.task-date .lucide-calendar-off')).toBeInTheDocument()
+  })
+
   it('向右拖动时只显示浅绿色完成底层', () => {
     const { container } = render(
       <TaskRow

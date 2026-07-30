@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { filterAndSortTasks, isTaskComplete, normalizeTaskDraft, switchedTaskValues } from './taskLogic'
+import {
+  filterAndSortTasks,
+  isTaskComplete,
+  normalizeTaskDraft,
+  switchedTaskValues,
+  updatedTaskInfo,
+} from './taskLogic'
 import type { Task } from '../types'
 
 const baseTask: Task = {
@@ -32,6 +38,12 @@ describe('任务状态逻辑', () => {
     expect(result.map((task) => task.id)).toEqual(['active', 'done'])
   })
 
+  it('全部看板包含无时间任务，今天看板不包含', () => {
+    const timeless = { ...baseTask, id: 'timeless', startDate: '', endDate: '' }
+    expect(filterAndSortTasks([timeless], 'all', false, '', new Date(2026, 6, 28))).toHaveLength(1)
+    expect(filterAndSortTasks([timeless], 'today', false, '', new Date(2026, 6, 28))).toHaveLength(0)
+  })
+
   it('标准化进度边界并清除无关完成字段', () => {
     expect(
       normalizeTaskDraft({
@@ -54,5 +66,24 @@ describe('任务状态逻辑', () => {
   it('从进度任务切换到普通任务时，仅在到达目标后标记完成', () => {
     expect(switchedTaskValues(baseTask, 'single').completed).toBe(false)
     expect(switchedTaskValues({ ...baseTask, count: 5 }, 'single').completed).toBe(true)
+  })
+
+  it('编辑任务时保留无时间状态并限制缩小后的进度', () => {
+    expect(
+      updatedTaskInfo(baseTask, {
+        title: '  新名称  ',
+        description: '  新描述  ',
+        startDate: '',
+        endDate: '',
+        targetCount: 2,
+      }),
+    ).toEqual({
+      title: '新名称',
+      description: '新描述',
+      startDate: '',
+      endDate: '',
+      targetCount: 2,
+      count: 2,
+    })
   })
 })

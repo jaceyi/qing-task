@@ -10,6 +10,19 @@ const date = (offset: number, hour: number, minute = 0) => {
 
 export const demoTasks: Task[] = [
   {
+    id: 'demo-timeless',
+    title: '整理灵感清单',
+    description: '随时补充，不需要安排具体日期。',
+    startDate: '',
+    endDate: '',
+    type: 'single',
+    targetCount: 0,
+    count: 0,
+    completed: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
     id: 'demo-1',
     title: '写完产品方案',
     description: '整理目标、核心流程与本周交付范围。',

@@ -15,11 +15,13 @@ export function toDateTimeInput(date = new Date()) {
 }
 
 export function normalizeDateTimeInput(value: string, boundary: 'start' | 'end' = 'start') {
+  if (!value) return ''
   if (value.includes('T')) return value.slice(0, 16)
   return `${value}T${boundary === 'start' ? '00:00' : '23:59'}`
 }
 
 export function parseLocalDate(value: string, boundary: 'start' | 'end' = 'start') {
+  if (!value) return null
   const normalized = normalizeDateTimeInput(value, boundary)
   const [datePart, timePart] = normalized.split('T')
   const [year, month, day] = datePart.split('-').map(Number)
@@ -58,16 +60,25 @@ export function taskOverlapsScope(
 
   const taskStart = parseLocalDate(task.startDate, 'start')
   const taskEnd = parseLocalDate(task.endDate, 'end')
+  if (!taskStart || !taskEnd) return false
   return taskStart <= scopeRange.end && taskEnd >= scopeRange.start
 }
 
 export function formatDateRange(startDate: string, endDate: string) {
   const start = parseLocalDate(startDate, 'start')
   const end = parseLocalDate(endDate, 'end')
+  if (!start && !end) return '无时间'
+
   const hasMinute = startDate.includes('T') || endDate.includes('T')
   const formatDay = (date: Date) => `${date.getMonth() + 1}/${date.getDate()}`
   const formatTime = (date: Date) =>
     `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  const formatPoint = (date: Date) =>
+    hasMinute ? `${formatDay(date)} ${formatTime(date)}` : formatDay(date)
+
+  if (!start && end) return `截至 ${formatPoint(end)}`
+  if (start && !end) return `${formatPoint(start)} 起`
+  if (!start || !end) return '无时间'
 
   if (!hasMinute) {
     if (startDate === endDate) return formatDay(start)
@@ -78,6 +89,13 @@ export function formatDateRange(startDate: string, endDate: string) {
     return `${formatDay(start)} ${formatTime(start)} – ${formatTime(end)}`
   }
   return `${formatDay(start)} ${formatTime(start)} – ${formatDay(end)} ${formatTime(end)}`
+}
+
+export function validateTaskDateRange(startDate: string, endDate: string) {
+  if (!startDate && !endDate) return ''
+  if (!startDate || !endDate) return '请同时填写开始和结束时间，或都留空'
+  if (startDate > endDate) return '结束日期不能早于开始日期'
+  return ''
 }
 
 export function formatLongDate(date = new Date()) {

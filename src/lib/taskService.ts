@@ -3,10 +3,10 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  increment,
   onSnapshot,
   orderBy,
   query,
-  runTransaction,
   serverTimestamp,
   setDoc,
   Timestamp,
@@ -15,16 +15,26 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import { normalizeTaskDraft, switchedTaskValues } from './taskLogic'
+import { normalizeTaskDraft, switchedTaskValues, updatedTaskInfo } from './taskLogic'
 import type {
   SyncState,
   Task,
   TaskDraft,
+  TaskInfoFields,
   TaskLog,
   TaskLogType,
   TaskType,
   UserPreferences,
 } from '../types'
+
+export interface QueuedMutation<T> {
+  result: T
+  committed: Promise<void>
+}
+
+function unchanged<T>(result: T): QueuedMutation<T> {
+  return { result, committed: Promise.resolve() }
+}
 
 function toDate(value: unknown) {
   return value instanceof Timestamp ? value.toDate() : null
@@ -73,7 +83,9 @@ export function subscribeTasks(
     { includeMetadataChanges: true },
     (snapshot) => {
       onData(
-        snapshot.docs.map((item) => mapTask(item.id, item.data())),
+        snapshot.docs.map((item) =>
+          mapTask(item.id, item.data({ serverTimestamps: 'estimate' })),
+        ),
         {
           fromCache: snapshot.metadata.fromCache,
           pendingWrites: snapshot.metadata.hasPendingWrites,
@@ -84,11 +96,11 @@ export function subscribeTasks(
   )
 }
 
-export async function createTask(
+export function createTask(
   userId: string,
   draft: TaskDraft,
   copiedFrom?: string,
-) {
+): QueuedMutation<string> {
   const normalized = normalizeTaskDraft(draft)
   const reference = doc(collection(db, 'users', userId, 'tasks'))
   const batch = writeBatch(db)
@@ -104,154 +116,143 @@ export async function createTask(
       title: normalized.title,
     }),
   )
-  await batch.commit()
-  return reference.id
+  return { result: reference.id, committed: batch.commit() }
 }
 
-export async function updateTaskInfo(
+export function updateTaskInfo(
   userId: string,
-  taskId: string,
-  fields: Pick<Task, 'title' | 'description' | 'startDate' | 'endDate' | 'targetCount'>,
-) {
-  const reference = taskRef(userId, taskId)
-  await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(reference)
-    if (!snapshot.exists()) throw new Error('任务不存在')
-    const current = mapTask(snapshot.id, snapshot.data())
-    const targetCount =
-      current.type === 'progress'
-        ? Math.min(99_999, Math.max(1, Math.round(fields.targetCount)))
-        : 0
-    const nextCount = current.type === 'progress' ? Math.min(current.count, targetCount) : 0
-    const next = {
-      title: fields.title.trim().slice(0, 120),
-      description: fields.description.trim().slice(0, 2000),
-      startDate: fields.startDate,
-      endDate: fields.endDate,
-      targetCount,
-      count: nextCount,
-      updatedAt: serverTimestamp(),
-    }
-
-    const changes: Array<{
-      action: string
-      before: string | number
-      after: string | number
-    }> = []
-    if (current.title !== next.title) {
-      changes.push({ action: '修改任务名称', before: current.title, after: next.title })
-    }
-    if (current.description !== next.description) {
-      changes.push({ action: '修改任务描述', before: current.description, after: next.description })
-    }
+  current: Task,
+  fields: TaskInfoFields,
+): QueuedMutation<boolean> {
+  const next = updatedTaskInfo(current, fields)
+  const patch: Record<string, unknown> = {}
+  const changes: Array<{
+    action: string
+    before: string | number
+    after: string | number
+  }> = []
+  if (current.title !== next.title) {
+    patch.title = next.title
+    changes.push({ action: '修改任务名称', before: current.title, after: next.title })
+  }
+  if (current.description !== next.description) {
+    patch.description = next.description
+    changes.push({ action: '修改任务描述', before: current.description, after: next.description })
+  }
+  if (current.startDate !== next.startDate || current.endDate !== next.endDate) {
+    patch.startDate = next.startDate
+    patch.endDate = next.endDate
     if (current.startDate !== next.startDate) {
       changes.push({ action: '修改开始时间', before: current.startDate, after: next.startDate })
     }
     if (current.endDate !== next.endDate) {
       changes.push({ action: '修改结束时间', before: current.endDate, after: next.endDate })
     }
-    if (current.type === 'progress' && current.targetCount !== next.targetCount) {
-      changes.push({
-        action: '修改目标次数',
-        before: current.targetCount,
-        after: next.targetCount,
-      })
-    }
-    if (current.type === 'progress' && current.count !== next.count) {
-      changes.push({
-        action: '目标缩减，调整当前进度',
-        before: current.count,
-        after: next.count,
-      })
-    }
-
-    if (changes.length === 0) return
-    transaction.update(reference, next)
-    changes.forEach((change) => {
-      transaction.set(
-        newLogRef(userId, taskId),
-        logData('update', change.action, { before: change.before, after: change.after }),
-      )
+  }
+  if (current.type === 'progress' && current.targetCount !== next.targetCount) {
+    patch.targetCount = next.targetCount
+    changes.push({
+      action: '修改目标次数',
+      before: current.targetCount,
+      after: next.targetCount,
     })
+  }
+  if (current.type === 'progress' && current.count !== next.count) {
+    patch.count = next.count
+    changes.push({
+      action: '目标缩减，调整当前进度',
+      before: current.count,
+      after: next.count,
+    })
+  }
+
+  if (changes.length === 0) return unchanged(false)
+
+  const batch = writeBatch(db)
+  batch.update(taskRef(userId, current.id), { ...patch, updatedAt: serverTimestamp() })
+  changes.forEach((change) => {
+    batch.set(
+      newLogRef(userId, current.id),
+      logData('update', change.action, { before: change.before, after: change.after }),
+    )
   })
+  return { result: true, committed: batch.commit() }
 }
 
-export async function changeTaskType(
+export function changeTaskType(
   userId: string,
-  taskId: string,
+  current: Task,
   nextType: TaskType,
   targetCount = 1,
-) {
-  const reference = taskRef(userId, taskId)
-  await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(reference)
-    if (!snapshot.exists()) throw new Error('任务不存在')
-    const current = mapTask(snapshot.id, snapshot.data())
-    if (current.type === nextType) return
-    const next = switchedTaskValues(current, nextType, targetCount)
-    transaction.update(reference, { ...next, updatedAt: serverTimestamp() })
-    transaction.set(
-      newLogRef(userId, taskId),
-      logData('update', '切换任务类型', {
-        before: current.type,
-        after: nextType,
-        ...(nextType === 'progress' ? { targetCount: next.targetCount } : {}),
-      }),
-    )
-  })
-}
-
-export async function setSingleCompletion(userId: string, taskId: string, completed: boolean) {
-  const reference = taskRef(userId, taskId)
-  let changed = false
-  await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(reference)
-    if (!snapshot.exists()) throw new Error('任务不存在')
-    const current = mapTask(snapshot.id, snapshot.data())
-    if (current.type !== 'single' || current.completed === completed) return
-    changed = true
-    transaction.update(reference, { completed, updatedAt: serverTimestamp() })
-    transaction.set(
-      newLogRef(userId, taskId),
-      logData('progress', completed ? '完成任务' : '取消完成', {
-        before: current.completed,
-        after: completed,
-      }),
-    )
-  })
-  return changed
-}
-
-export async function adjustTaskProgress(userId: string, taskId: string, delta: -1 | 1) {
-  const reference = taskRef(userId, taskId)
-  let changed = false
-  await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(reference)
-    if (!snapshot.exists()) throw new Error('任务不存在')
-    const current = mapTask(snapshot.id, snapshot.data())
-    if (current.type !== 'progress') return
-    const nextCount = Math.max(0, Math.min(current.targetCount, current.count + delta))
-    if (nextCount === current.count) return
-    changed = true
-    transaction.update(reference, { count: nextCount, updatedAt: serverTimestamp() })
-    transaction.set(
-      newLogRef(userId, taskId),
-      logData('progress', delta > 0 ? '进度 +1' : '进度 −1', {
-        before: current.count,
-        after: nextCount,
-      }),
-    )
-  })
-  return changed
-}
-
-export async function deleteTask(userId: string, taskId: string) {
-  const reference = taskRef(userId, taskId)
-  const logs = await getDocs(collection(reference, 'logs'))
+): QueuedMutation<boolean> {
+  if (current.type === nextType) return unchanged(false)
+  const next = switchedTaskValues(current, nextType, targetCount)
   const batch = writeBatch(db)
-  logs.docs.forEach((entry) => batch.delete(entry.ref))
-  batch.delete(reference)
-  await batch.commit()
+  batch.update(taskRef(userId, current.id), { ...next, updatedAt: serverTimestamp() })
+  batch.set(
+    newLogRef(userId, current.id),
+    logData('update', '切换任务类型', {
+      before: current.type,
+      after: nextType,
+      ...(nextType === 'progress' ? { targetCount: next.targetCount } : {}),
+    }),
+  )
+  return { result: true, committed: batch.commit() }
+}
+
+export function setSingleCompletion(
+  userId: string,
+  current: Task,
+  completed: boolean,
+): QueuedMutation<boolean> {
+  if (current.type !== 'single' || current.completed === completed) return unchanged(false)
+  const batch = writeBatch(db)
+  batch.update(taskRef(userId, current.id), { completed, updatedAt: serverTimestamp() })
+  batch.set(
+    newLogRef(userId, current.id),
+    logData('progress', completed ? '完成任务' : '取消完成', {
+      before: current.completed,
+      after: completed,
+    }),
+  )
+  return { result: true, committed: batch.commit() }
+}
+
+export function adjustTaskProgress(
+  userId: string,
+  current: Task,
+  delta: -1 | 1,
+): QueuedMutation<boolean> {
+  if (current.type !== 'progress') return unchanged(false)
+  const nextCount = Math.max(0, Math.min(current.targetCount, current.count + delta))
+  if (nextCount === current.count) return unchanged(false)
+
+  const batch = writeBatch(db)
+  batch.update(taskRef(userId, current.id), {
+    count: increment(delta),
+    updatedAt: serverTimestamp(),
+  })
+  batch.set(
+    newLogRef(userId, current.id),
+    logData('progress', delta > 0 ? '进度 +1' : '进度 −1', {
+      before: current.count,
+      after: nextCount,
+      delta,
+    }),
+  )
+  return { result: true, committed: batch.commit() }
+}
+
+export function deleteTask(userId: string, taskId: string): QueuedMutation<boolean> {
+  const reference = taskRef(userId, taskId)
+  const committed = deleteDoc(reference).then(async () => {
+    const logs = await getDocs(collection(reference, 'logs'))
+    if (logs.empty) return
+    const batch = writeBatch(db)
+    logs.docs.forEach((entry) => batch.delete(entry.ref))
+    await batch.commit()
+  })
+  return { result: true, committed }
 }
 
 export function subscribeTaskLogs(
@@ -265,13 +266,16 @@ export function subscribeTaskLogs(
     logsQuery,
     (snapshot) =>
       onData(
-        snapshot.docs.map((entry) => ({
-          id: entry.id,
-          type: entry.data().type === 'progress' ? 'progress' : 'update',
-          action: String(entry.data().action ?? ''),
-          payload: (entry.data().payload ?? {}) as Record<string, unknown>,
-          createdAt: toDate(entry.data().createdAt),
-        })),
+        snapshot.docs.map((entry) => {
+          const data = entry.data({ serverTimestamps: 'estimate' })
+          return {
+            id: entry.id,
+            type: data.type === 'progress' ? 'progress' : 'update',
+            action: String(data.action ?? ''),
+            payload: (data.payload ?? {}) as Record<string, unknown>,
+            createdAt: toDate(data.createdAt),
+          }
+        }),
       ),
     (error) => onError(error),
   )

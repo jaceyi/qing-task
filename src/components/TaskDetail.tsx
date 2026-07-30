@@ -11,7 +11,7 @@ import {
   Save,
   Trash2,
 } from 'lucide-react'
-import { formatLogDate, normalizeDateTimeInput } from '../lib/date'
+import { formatLogDate, normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
 import { isTaskComplete } from '../lib/taskLogic'
 import type { Task, TaskLog, TaskType } from '../types'
 
@@ -40,7 +40,10 @@ function describeLog(log: TaskLog) {
     return `${value(before)} → ${value(after)}`
   }
   if (typeof log.payload.title === 'string') return log.payload.title
-  if (typeof before === 'string' && typeof after === 'string') return `${before} → ${after}`
+  if (typeof before === 'string' && typeof after === 'string') {
+    const value = (item: string) => item || '无时间'
+    return `${value(before)} → ${value(after)}`
+  }
   return ''
 }
 
@@ -80,7 +83,8 @@ export function TaskDetail({
 
   const saveInfo = async () => {
     if (!title.trim()) return setError('任务名称不能为空')
-    if (startDate > endDate) return setError('结束日期不能早于开始日期')
+    const dateError = validateTaskDateRange(startDate, endDate)
+    if (dateError) return setError(dateError)
     if (task.type === 'progress' && targetCount < 1) return setError('目标次数至少为 1')
     setSaving(true)
     setError('')
@@ -167,13 +171,28 @@ export function TaskDetail({
                 />
               </label>
               <label className="field-group">
-                <span>开始时间</span>
+                <span>开始时间 <small>可选</small></span>
                 <input type="datetime-local" step="60" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
               </label>
               <label className="field-group">
-                <span>结束时间</span>
+                <span>结束时间 <small>可选</small></span>
                 <input type="datetime-local" step="60" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
               </label>
+              <div className="date-fieldset-footer detail-date-footer full-width">
+                <small>开始和结束时间都留空时，任务仅显示在“全部”看板。</small>
+                {(startDate || endDate) && (
+                  <button
+                    type="button"
+                    className="text-button clear-time-button"
+                    onClick={() => {
+                      setStartDate('')
+                      setEndDate('')
+                    }}
+                  >
+                    清除时间
+                  </button>
+                )}
+              </div>
               {task.type === 'progress' && (
                 <label className="field-group">
                   <span>目标次数</span>

@@ -21,6 +21,11 @@ export type TaskDraft = Pick<
   'title' | 'description' | 'startDate' | 'endDate' | 'type' | 'targetCount' | 'count' | 'completed'
 >
 
+export type TaskInfoFields = Pick<
+  Task,
+  'title' | 'description' | 'startDate' | 'endDate' | 'targetCount'
+>
+
 export interface TaskLog {
   id: string
   type: TaskLogType

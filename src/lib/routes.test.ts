@@ -3,10 +3,12 @@ import { parseAppRoute, pathForRoute, routeDefinitions } from './routes'
 
 describe('应用路由', () => {
   it('解析任务看板与设置页', () => {
+    expect(parseAppRoute('/')).toEqual({ name: 'board', scope: 'all' })
     expect(parseAppRoute(routeDefinitions.today)).toEqual({ name: 'board', scope: 'today' })
     expect(parseAppRoute(routeDefinitions.week)).toEqual({ name: 'board', scope: 'week' })
     expect(parseAppRoute(routeDefinitions.all)).toEqual({ name: 'board', scope: 'all' })
     expect(parseAppRoute(routeDefinitions.settings)).toEqual({ name: 'settings' })
+    expect(parseAppRoute('/unknown')).toEqual({ name: 'board', scope: 'all' })
   })
 
   it('详情与复制路由支持安全编码', () => {

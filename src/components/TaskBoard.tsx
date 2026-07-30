@@ -1,4 +1,4 @@
-import { Eye, Inbox, Plus } from 'lucide-react'
+import { CalendarRange, Eye, Inbox, Layers3, Plus, SunMedium } from 'lucide-react'
 import { filterAndSortTasks, isTaskComplete } from '../lib/taskLogic'
 import type { BoardScope, Task } from '../types'
 import { TaskRow } from './TaskRow'
@@ -16,10 +16,10 @@ interface TaskBoardProps {
   onNotify: (message: string) => void
 }
 
-const scopes: Array<{ id: BoardScope; label: string }> = [
-  { id: 'today', label: '今天' },
-  { id: 'week', label: '本周' },
-  { id: 'all', label: '全部' },
+const scopes: Array<{ id: BoardScope; label: string; icon: typeof Layers3 }> = [
+  { id: 'all', label: '全部', icon: Layers3 },
+  { id: 'today', label: '今天', icon: SunMedium },
+  { id: 'week', label: '本周', icon: CalendarRange },
 ]
 
 const scopeTitles: Record<BoardScope, string> = {
@@ -51,16 +51,17 @@ export function TaskBoard({
       </div>
 
       <div className="scope-tabs" role="tablist" aria-label="任务时间范围">
-        {scopes.map((item) => (
+        {scopes.map(({ id, label, icon: Icon }) => (
           <button
-            key={item.id}
+            key={id}
             type="button"
             role="tab"
-            aria-selected={scope === item.id}
-            className={scope === item.id ? 'is-active' : ''}
-            onClick={() => onScopeChange(item.id)}
+            aria-selected={scope === id}
+            className={scope === id ? 'is-active' : ''}
+            onClick={() => onScopeChange(id)}
           >
-            {item.label}
+            <Icon />
+            {label}
           </button>
         ))}
       </div>
@@ -75,7 +76,13 @@ export function TaskBoard({
         <div className="empty-state">
           <span className="empty-icon"><Inbox /></span>
           <h2>{searchTerm ? '没有匹配的任务' : '这里还没有任务'}</h2>
-          <p>{searchTerm ? '换个关键词再试试。' : '创建一个任务，从今天开始推进。'}</p>
+          <p>
+            {searchTerm
+              ? '换个关键词再试试。'
+              : scope === 'all'
+                ? '创建一个任务，时间可以稍后再安排。'
+                : '暂时没有落在这个时间范围内的任务。'}
+          </p>
           {!searchTerm && (
             <button type="button" className="primary-button" onClick={onCreate}>
               <Plus />

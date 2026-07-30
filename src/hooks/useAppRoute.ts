@@ -29,8 +29,8 @@ export function useAppRoute() {
 
   useEffect(() => {
     if (window.location.pathname !== '/') return
-    const canonical = urlWithDevelopmentFlags(pathForRoute({ name: 'board', scope: 'today' }))
-    window.history.replaceState({ appRoute: true, fromScope: 'today' }, '', canonical)
+    const canonical = urlWithDevelopmentFlags(pathForRoute({ name: 'board', scope: 'all' }))
+    window.history.replaceState({ appRoute: true, fromScope: 'all' }, '', canonical)
   }, [])
 
   const navigate = useCallback(
@@ -58,5 +58,5 @@ export function useAppRoute() {
   )
 
   const state = window.history.state as RouteState | null
-  return { route, navigate, goBackToBoard, fromScope: state?.fromScope ?? 'today' }
+  return { route, navigate, goBackToBoard, fromScope: state?.fromScope ?? 'all' }
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeft, CalendarDays, Check, Layers3, X } from 'lucide-react'
-import { addMinutes, normalizeDateTimeInput, toDateTimeInput } from '../lib/date'
+import { normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
 import type { Task, TaskDraft, TaskType } from '../types'
 
 interface TaskFormPanelProps {
@@ -10,16 +10,12 @@ interface TaskFormPanelProps {
 }
 
 function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
-  const now = new Date()
-  now.setSeconds(0, 0)
-  const startTime = toDateTimeInput(now)
-  const endTime = toDateTimeInput(addMinutes(now, 60))
   if (!sourceTask) {
     return {
       title: '',
       description: '',
-      startDate: startTime,
-      endDate: endTime,
+      startDate: '',
+      endDate: '',
       type: 'single',
       targetCount: 5,
       count: 0,
@@ -55,8 +51,9 @@ export function TaskFormPanel({ sourceTask, onClose, onSubmit }: TaskFormPanelPr
       setError('请输入任务名称')
       return
     }
-    if (draft.startDate > draft.endDate) {
-      setError('结束日期不能早于开始日期')
+    const dateError = validateTaskDateRange(draft.startDate, draft.endDate)
+    if (dateError) {
+      setError(dateError)
       return
     }
     if (draft.type === 'progress' && draft.targetCount < 1) {
@@ -156,7 +153,7 @@ export function TaskFormPanel({ sourceTask, onClose, onSubmit }: TaskFormPanelPr
           )}
 
           <fieldset className="field-group date-fieldset">
-            <legend><CalendarDays /> 时间范围</legend>
+            <legend><CalendarDays /> <span>时间范围 <small>可选</small></span></legend>
             <div className="date-grid">
               <label>
                 <span>开始时间</span>
@@ -177,7 +174,18 @@ export function TaskFormPanel({ sourceTask, onClose, onSubmit }: TaskFormPanelPr
                 />
               </label>
             </div>
-            <small>支持精确到分钟；时间只影响任务出现在哪个看板，不限制操作。</small>
+            <div className="date-fieldset-footer">
+              <small>留空时作为无时间任务，仅显示在“全部”看板。</small>
+              {(draft.startDate || draft.endDate) && (
+                <button
+                  type="button"
+                  className="text-button clear-time-button"
+                  onClick={() => setDraft({ ...draft, startDate: '', endDate: '' })}
+                >
+                  清除时间
+                </button>
+              )}
+            </div>
           </fieldset>
 
           {error && <p className="form-error" role="alert">{error}</p>}
