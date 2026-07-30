@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { parseAppRoute, pathForRoute, type AppRoute } from '../lib/routes'
 import type { BoardScope } from '../types'
 
+type TopLevelRoute = Extract<AppRoute, { name: 'board' | 'settings' }>
+
 interface RouteState {
   appRoute?: boolean
   fromScope?: BoardScope
@@ -45,6 +47,13 @@ export function useAppRoute() {
     [],
   )
 
+  const navigateTopLevel = useCallback(
+    (next: TopLevelRoute, options: { fromScope?: BoardScope } = {}) => {
+      navigate(next, { ...options, replace: true })
+    },
+    [navigate],
+  )
+
   const goBackToBoard = useCallback(
     (fallbackScope: BoardScope) => {
       const state = window.history.state as RouteState | null
@@ -58,5 +67,11 @@ export function useAppRoute() {
   )
 
   const state = window.history.state as RouteState | null
-  return { route, navigate, goBackToBoard, fromScope: state?.fromScope ?? 'all' }
+  return {
+    route,
+    navigate,
+    navigateTopLevel,
+    goBackToBoard,
+    fromScope: state?.fromScope ?? 'all',
+  }
 }

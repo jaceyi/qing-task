@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, CalendarDays, Check, Layers3, X } from 'lucide-react'
 import { normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
 import type { Task, TaskDraft, TaskType } from '../types'
 
 interface TaskFormPanelProps {
   sourceTask?: Task | null
+  draftStorageKey: string
   onClose: () => void
   onSubmit: (draft: TaskDraft, copiedFrom?: string) => Promise<void>
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
@@ -34,12 +36,127 @@ function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
   }
 }
 
-export function TaskFormPanel({ sourceTask, onClose, onSubmit }: TaskFormPanelProps) {
-  const [draft, setDraft] = useState(() => makeInitialDraft(sourceTask))
+function readStoredDraft(storageKey: string, fallback: TaskDraft) {
+  try {
+    const stored = localStorage.getItem(storageKey)
+    if (!stored) return fallback
+    const parsed = JSON.parse(stored) as Partial<TaskDraft>
+    if (
+      typeof parsed.title !== 'string' ||
+      typeof parsed.description !== 'string' ||
+      typeof parsed.startDate !== 'string' ||
+      typeof parsed.endDate !== 'string' ||
+      (parsed.type !== 'single' && parsed.type !== 'progress') ||
+      typeof parsed.targetCount !== 'number'
+    ) return fallback
+    return { ...fallback, ...parsed }
+  } catch {
+    return fallback
+  }
+}
+
+export function TaskFormPanel({
+  sourceTask,
+  draftStorageKey,
+  onClose,
+  onSubmit,
+  onDirtyChange,
+}: TaskFormPanelProps) {
+  const initialDraft = useMemo(() => makeInitialDraft(sourceTask), [sourceTask])
+  const initialSignature = useMemo(() => JSON.stringify(initialDraft), [initialDraft])
+  const [draft, setDraft] = useState(() => readStoredDraft(draftStorageKey, initialDraft))
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const panelRef = useRef<HTMLElement>(null)
+  const discardDialogRef = useRef<HTMLDivElement>(null)
+  const discardCancelRef = useRef<HTMLButtonElement>(null)
+  const openerRef = useRef<HTMLElement | null>(
+    typeof document === 'undefined' ? null : document.activeElement as HTMLElement | null,
+  )
+  const dirty = JSON.stringify(draft) !== initialSignature
 
-  useEffect(() => setDraft(makeInitialDraft(sourceTask)), [sourceTask])
+  useEffect(() => {
+    setDraft(readStoredDraft(draftStorageKey, initialDraft))
+    setError('')
+    setSaving(false)
+    setConfirmDiscard(false)
+  }, [draftStorageKey, initialDraft])
+
+  useEffect(() => {
+    if (dirty) localStorage.setItem(draftStorageKey, JSON.stringify(draft))
+    else localStorage.removeItem(draftStorageKey)
+  }, [dirty, draft, draftStorageKey])
+
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+    return () => onDirtyChange?.(false)
+  }, [dirty, onDirtyChange])
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [dirty])
+
+  const requestClose = useCallback(() => {
+    if (dirty) setConfirmDiscard(true)
+    else onClose()
+  }, [dirty, onClose])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (confirmDiscard) setConfirmDiscard(false)
+        else requestClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusRoot = confirmDiscard ? discardDialogRef.current : panelRef.current
+      const focusable = Array.from(
+        focusRoot?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((element) => element.offsetParent !== null)
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [confirmDiscard, requestClose])
+
+  useEffect(() => {
+    if (confirmDiscard) discardCancelRef.current?.focus()
+  }, [confirmDiscard])
+
+  useEffect(() => () => {
+    if (openerRef.current?.isConnected) openerRef.current.focus()
+  }, [])
+
+  useEffect(() => {
+    const backdrop = panelRef.current?.parentElement
+    const appRoot = backdrop?.parentElement
+    if (!backdrop || !appRoot) return
+    const siblings = Array.from(appRoot.children).filter(
+      (element): element is HTMLElement => element instanceof HTMLElement && element !== backdrop,
+    )
+    const previous = siblings.map((element) => ({ element, inert: element.inert }))
+    siblings.forEach((element) => { element.inert = true })
+    return () => previous.forEach(({ element, inert }) => { element.inert = inert })
+  }, [])
 
   const setType = (type: TaskType) => {
     setDraft((current) => ({ ...current, type }))
@@ -64,6 +181,7 @@ export function TaskFormPanel({ sourceTask, onClose, onSubmit }: TaskFormPanelPr
     setError('')
     try {
       await onSubmit(draft, sourceTask?.title)
+      localStorage.removeItem(draftStorageKey)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '创建任务失败')
       setSaving(false)
@@ -71,23 +189,24 @@ export function TaskFormPanel({ sourceTask, onClose, onSubmit }: TaskFormPanelPr
   }
 
   return (
-    <div className="panel-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="panel-backdrop" role="presentation" onPointerDown={requestClose}>
       <section
+        ref={panelRef}
         className="task-form-panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="task-form-title"
-        onMouseDown={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
       >
         <header className="panel-header">
-          <button type="button" className="icon-button mobile-only" onClick={onClose} aria-label="返回">
+          <button type="button" className="icon-button mobile-only" onClick={requestClose} aria-label="返回">
             <ArrowLeft />
           </button>
           <div>
             <span className="eyebrow">{sourceTask ? '复制任务' : '创建任务'}</span>
             <h2 id="task-form-title">{sourceTask ? '复制为新任务' : '新建任务'}</h2>
           </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="关闭">
+          <button type="button" className="icon-button" onClick={requestClose} aria-label="关闭">
             <X />
           </button>
         </header>
@@ -191,12 +310,49 @@ export function TaskFormPanel({ sourceTask, onClose, onSubmit }: TaskFormPanelPr
           {error && <p className="form-error" role="alert">{error}</p>}
 
           <footer className="panel-actions">
-            <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+            <button type="button" className="secondary-button" onClick={requestClose}>取消</button>
             <button type="submit" className="primary-button" disabled={saving}>
               {saving ? '正在创建…' : sourceTask ? '创建副本' : '创建任务'}
             </button>
           </footer>
         </form>
+
+        {confirmDiscard && (
+          <div className="discard-backdrop" onPointerDown={() => setConfirmDiscard(false)}>
+            <div
+              ref={discardDialogRef}
+              className="discard-dialog"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="discard-title"
+              aria-describedby="discard-description"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <h3 id="discard-title">退出新建任务？</h3>
+              <p id="discard-description">草稿已经保存在本机，你可以保留后退出，也可以彻底放弃。</p>
+              <div className="confirm-actions">
+                <button ref={discardCancelRef} type="button" className="text-button" onClick={() => setConfirmDiscard(false)}>继续编辑</button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    onDirtyChange?.(false)
+                    onClose()
+                  }}
+                >保留并退出</button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  onClick={() => {
+                    localStorage.removeItem(draftStorageKey)
+                    onDirtyChange?.(false)
+                    onClose()
+                  }}
+                >放弃草稿</button>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   )
