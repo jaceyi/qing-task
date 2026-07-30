@@ -3,18 +3,20 @@ import { signOut } from 'firebase/auth'
 import {
   ArrowLeft,
   ArrowRight,
-  CalendarDays,
+  CalendarRange,
   Check,
   CheckSquare2,
   ChevronDown,
   Cloud,
   CloudOff,
   ListTodo,
+  Layers3,
   LogOut,
   Plus,
   Search,
   Settings,
   SlidersHorizontal,
+  SunMedium,
   X,
 } from 'lucide-react'
 import { auth } from './lib/firebase'
@@ -33,10 +35,16 @@ import type { BoardScope, Task, TaskDraft, TaskType } from './types'
 import './App.css'
 
 const scopeLabels: Record<BoardScope, string> = {
+  all: '全部',
   today: '今天',
   week: '本周',
-  all: '全部',
 }
+
+const scopeIcons = {
+  all: Layers3,
+  today: SunMedium,
+  week: CalendarRange,
+} satisfies Record<BoardScope, typeof Layers3>
 
 function LoadingScreen() {
   return (
@@ -93,10 +101,10 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (selectedTaskId && !selectedTask && !taskData.loading) {
+    if (selectedTaskId && !selectedTask && taskData.dataReady) {
       navigate({ name: 'board', scope: boardScope }, { replace: true, fromScope: boardScope })
     }
-  }, [boardScope, navigate, selectedTask, selectedTaskId, taskData.loading])
+  }, [boardScope, navigate, selectedTask, selectedTaskId, taskData.dataReady])
 
   useEffect(() => {
     const main = document.querySelector<HTMLElement>('.main-content')
@@ -215,17 +223,20 @@ function App() {
       <aside className="board-sidebar">
         <div className="sidebar-brand">看板</div>
         <nav aria-label="时间看板">
-          {(['today', 'week', 'all'] as BoardScope[]).map((scope) => (
-            <button
-              key={scope}
-              type="button"
-              className={route.name === 'board' && boardScope === scope ? 'is-active' : ''}
-              onClick={() => navigateToBoard(scope)}
-            >
-              <span><CalendarDays />{scopeLabels[scope]}</span>
-              <strong>{countForScope(scope)}</strong>
-            </button>
-          ))}
+          {(['all', 'today', 'week'] as BoardScope[]).map((scope) => {
+            const ScopeIcon = scopeIcons[scope]
+            return (
+              <button
+                key={scope}
+                type="button"
+                className={route.name === 'board' && boardScope === scope ? 'is-active' : ''}
+                onClick={() => navigateToBoard(scope)}
+              >
+                <span><ScopeIcon />{scopeLabels[scope]}</span>
+                <strong>{countForScope(scope)}</strong>
+              </button>
+            )
+          })}
         </nav>
       </aside>
 
@@ -357,8 +368,16 @@ function App() {
           <section className="sync-section">
             <div className={`sync-icon ${online ? '' : 'offline'}`}>{online ? <Cloud /> : <CloudOff />}</div>
             <div>
-              <strong>{online ? taskData.syncState.pendingWrites ? '正在同步…' : '已同步到云端' : '当前处于离线状态'}</strong>
-              <small>{taskData.syncState.fromCache ? '正在显示本地缓存' : '个人任务仅你可见'}</small>
+              <strong>
+                {online
+                  ? taskData.syncState.pendingWrites ? '已在本机保存，正在同步…' : '已同步到云端'
+                  : taskData.syncState.pendingWrites ? '更改已保存在本机' : '当前处于离线状态'}
+              </strong>
+              <small>
+                {!online && taskData.syncState.pendingWrites
+                  ? '联网后将自动同步'
+                  : taskData.syncState.fromCache ? '正在显示本地缓存' : '个人任务仅你可见'}
+              </small>
             </div>
           </section>
           {demoMode && <span className="demo-badge">本地预览模式</span>}

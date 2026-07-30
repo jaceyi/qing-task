@@ -17,9 +17,9 @@ export const routeDefinitions = {
 
 export function parseAppRoute(pathname: string, search = ''): AppRoute {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
-  if (path === '/' || path === routeDefinitions.today) return { name: 'board', scope: 'today' }
+  if (path === '/' || path === routeDefinitions.all) return { name: 'board', scope: 'all' }
+  if (path === routeDefinitions.today) return { name: 'board', scope: 'today' }
   if (path === routeDefinitions.week) return { name: 'board', scope: 'week' }
-  if (path === routeDefinitions.all) return { name: 'board', scope: 'all' }
   if (path === routeDefinitions.settings) return { name: 'settings' }
   if (path === routeDefinitions.taskNew) {
     const copiedFrom = new URLSearchParams(search).get('copy') || undefined
@@ -28,7 +28,7 @@ export function parseAppRoute(pathname: string, search = ''): AppRoute {
 
   const taskMatch = path.match(/^\/tasks\/([^/]+)$/)
   if (taskMatch) return { name: 'task-detail', taskId: decodeURIComponent(taskMatch[1]) }
-  return { name: 'board', scope: 'today' }
+  return { name: 'board', scope: 'all' }
 }
 
 export function pathForRoute(route: AppRoute) {

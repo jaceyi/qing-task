@@ -682,6 +682,20 @@
   font-size: 11px;
 }
 
+.task-date.is-timeless {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #6d8f83;
+}
+
+.task-date.is-timeless svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2;
+}
+
 .task-status {
   display: grid;
   justify-items: end;
@@ -1205,6 +1219,18 @@ input[role="switch"]:checked::after {
   color: var(--primary);
 }
 
+.date-fieldset legend span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.date-fieldset legend small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .date-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1215,6 +1241,33 @@ input[role="switch"]:checked::after {
   min-width: 0;
   display: grid;
   gap: 7px;
+}
+
+.date-fieldset-footer {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.date-fieldset-footer > small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.clear-time-button {
+  min-height: 28px;
+  padding: 0 4px;
+  flex: 0 0 auto;
+  color: var(--primary-strong);
+  font-size: 11px;
+}
+
+.detail-date-footer {
+  min-height: 32px;
+  margin: -2px 0 8px;
 }
 
 .form-error {
@@ -2223,10 +2276,19 @@ input[role="switch"]:checked::after {
   .scope-tabs button {
     border: 0;
     border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     color: #656477;
     background: transparent;
     font-size: 13px;
     cursor: pointer;
+  }
+
+  .scope-tabs button svg {
+    width: 14px;
+    height: 14px;
   }
 
   .scope-tabs button.is-active {

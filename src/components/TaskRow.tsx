@@ -1,5 +1,5 @@
 import { useRef, useState, type PointerEvent } from 'react'
-import { Check, Minus, Plus, X } from 'lucide-react'
+import { CalendarOff, Check, Minus, Plus, X } from 'lucide-react'
 import { formatDateRange } from '../lib/date'
 import { isTaskComplete } from '../lib/taskLogic'
 import type { Task } from '../types'
@@ -174,7 +174,10 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
             onClick={handleOpen}
           >
             <span className="task-title">{task.title}</span>
-            <span className="task-date">{formatDateRange(task.startDate, task.endDate)}</span>
+            <span className={`task-date ${!task.startDate && !task.endDate ? 'is-timeless' : ''}`}>
+              {!task.startDate && !task.endDate && <CalendarOff />}
+              {formatDateRange(task.startDate, task.endDate)}
+            </span>
           </button>
         </span>
 

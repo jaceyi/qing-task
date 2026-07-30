@@ -1,5 +1,5 @@
 import { taskOverlapsScope } from './date'
-import type { BoardScope, Task, TaskDraft, TaskType } from '../types'
+import type { BoardScope, Task, TaskDraft, TaskInfoFields, TaskType } from '../types'
 
 export function isTaskComplete(task: Pick<Task, 'type' | 'completed' | 'count' | 'targetCount'>) {
   return task.type === 'single' ? task.completed : task.count === task.targetCount
@@ -50,6 +50,22 @@ export function normalizeTaskDraft(draft: TaskDraft): TaskDraft {
     targetCount,
     count: Math.min(targetCount, Math.max(0, Math.round(draft.count || 0))),
     completed: false,
+  }
+}
+
+export function updatedTaskInfo(task: Task, fields: TaskInfoFields) {
+  const targetCount =
+    task.type === 'progress'
+      ? Math.min(99_999, Math.max(1, Math.round(fields.targetCount || 1)))
+      : 0
+
+  return {
+    title: fields.title.trim().slice(0, 120),
+    description: fields.description.trim().slice(0, 2000),
+    startDate: fields.startDate,
+    endDate: fields.endDate,
+    targetCount,
+    count: task.type === 'progress' ? Math.min(task.count, targetCount) : 0,
   }
 }
 

@@ -22,6 +22,12 @@ service cloud.firestore {
           || (data.description is string && data.description.size() <= 2000))
         && data.startDate is string
         && data.endDate is string
+        && (
+          (data.startDate.size() == 0 && data.endDate.size() == 0)
+          ||
+          (data.startDate.size() >= 10 && data.startDate.size() <= 16
+            && data.endDate.size() >= 10 && data.endDate.size() <= 16)
+        )
         && data.type in ['single', 'progress']
         && data.targetCount is int
         && data.count is int
