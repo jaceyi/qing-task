@@ -147,6 +147,23 @@ describe('任务行手势', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 
+  it('将进度操作放在进度展示之前，让状态列固定在最右侧', () => {
+    const { container } = render(
+      <TaskRow
+        task={progressTask}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => true)}
+        onNotify={vi.fn()}
+      />,
+    )
+
+    const actions = container.querySelector('.task-inline-actions')
+    const status = container.querySelector('.task-status')
+    expect(actions).not.toBeNull()
+    expect(status).not.toBeNull()
+    expect(actions!.compareDocumentPosition(status!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('仅标题和时间内容区可以打开详情', async () => {
     const onOpen = vi.fn()
     const { container } = render(

@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
-  ArrowLeft,
+  CircleAlert,
+  CircleCheck,
   Check,
   Clock3,
   Copy,
   History,
   Layers3,
+  LoaderCircle,
   Minus,
   Plus,
-  Save,
   Trash2,
 } from 'lucide-react'
 import { formatLogDate, normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
@@ -19,7 +20,6 @@ interface TaskDetailProps {
   task: Task
   logs: TaskLog[]
   logsError: string
-  onBack: () => void
   onCopy: () => void
   onSave: (
     fields: Pick<Task, 'title' | 'description' | 'startDate' | 'endDate' | 'targetCount'>,
@@ -29,6 +29,13 @@ interface TaskDetailProps {
   onAdjust: (delta: -1 | 1) => Promise<boolean>
   onDelete: () => Promise<void>
   onNotify: (message: string) => void
+  onDirtyChange?: (dirty: boolean) => void
+}
+
+type AutoSaveState = 'idle' | 'waiting' | 'saving' | 'saved' | 'error' | 'invalid'
+
+function infoSignature(fields: Pick<Task, 'title' | 'description' | 'startDate' | 'endDate' | 'targetCount'>) {
+  return JSON.stringify(fields)
 }
 
 function describeLog(log: TaskLog) {
@@ -51,7 +58,6 @@ export function TaskDetail({
   task,
   logs,
   logsError,
-  onBack,
   onCopy,
   onSave,
   onChangeType,
@@ -59,6 +65,7 @@ export function TaskDetail({
   onAdjust,
   onDelete,
   onNotify,
+  onDirtyChange,
 }: TaskDetailProps) {
   const [title, setTitle] = useState(task.title)
   const [description, setDescription] = useState(task.description)
@@ -67,36 +74,95 @@ export function TaskDetail({
   const [targetCount, setTargetCount] = useState(task.targetCount || 5)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [infoError, setInfoError] = useState('')
+  const [infoDirty, setInfoDirty] = useState(false)
+  const [autoSaveState, setAutoSaveState] = useState<AutoSaveState>('idle')
+  const [autoSaveRevision, setAutoSaveRevision] = useState(0)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmTypeChange, setConfirmTypeChange] = useState<TaskType | null>(null)
+  const onSaveRef = useRef(onSave)
+  const latestInfoRef = useRef({ title, description, startDate, endDate, targetCount })
+  const infoDirtyRef = useRef(infoDirty)
+  const autoSaveStateRef = useRef(autoSaveState)
+  const taskTypeRef = useRef(task.type)
   const complete = isTaskComplete(task)
   const displayedType = confirmTypeChange ?? task.type
 
   useEffect(() => {
+    onSaveRef.current = onSave
+  }, [onSave])
+
+  useEffect(() => {
+    if (infoDirty) return
     setTitle(task.title)
     setDescription(task.description)
     setStartDate(normalizeDateTimeInput(task.startDate, 'start'))
     setEndDate(normalizeDateTimeInput(task.endDate, 'end'))
     setTargetCount(task.targetCount || 5)
-    setConfirmTypeChange(null)
-  }, [task])
+  }, [infoDirty, task])
 
-  const saveInfo = async () => {
-    if (!title.trim()) return setError('任务名称不能为空')
-    const dateError = validateTaskDateRange(startDate, endDate)
-    if (dateError) return setError(dateError)
-    if (task.type === 'progress' && targetCount < 1) return setError('目标次数至少为 1')
-    setSaving(true)
-    setError('')
-    try {
-      await onSave({ title, description, startDate, endDate, targetCount })
-      onNotify('任务信息已保存')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '保存失败')
-    } finally {
-      setSaving(false)
+  latestInfoRef.current = { title, description, startDate, endDate, targetCount }
+  infoDirtyRef.current = infoDirty
+  autoSaveStateRef.current = autoSaveState
+  taskTypeRef.current = task.type
+
+  useEffect(() => () => {
+    if (!infoDirtyRef.current || autoSaveStateRef.current === 'saving') return
+    const fields = latestInfoRef.current
+    const dateError = validateTaskDateRange(fields.startDate, fields.endDate)
+    const invalid = !fields.title.trim()
+      || Boolean(dateError)
+      || (taskTypeRef.current === 'progress' && fields.targetCount < 1)
+    if (!invalid) void onSaveRef.current(fields)
+  }, [])
+
+  useEffect(() => {
+    onDirtyChange?.(infoDirty)
+    return () => onDirtyChange?.(false)
+  }, [infoDirty, onDirtyChange])
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!infoDirty) return
+      event.preventDefault()
+      event.returnValue = ''
     }
-  }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [infoDirty])
+
+  useEffect(() => {
+    if (!infoDirty) return
+    const fields = { title, description, startDate, endDate, targetCount }
+    const signature = infoSignature(fields)
+    const dateError = validateTaskDateRange(startDate, endDate)
+    const validationError = !title.trim()
+      ? '任务名称不能为空'
+      : dateError || (task.type === 'progress' && targetCount < 1 ? '目标次数至少为 1' : '')
+    if (validationError) {
+      setInfoError(validationError)
+      setAutoSaveState('invalid')
+      return
+    }
+
+    setInfoError('')
+    setAutoSaveState('waiting')
+    const timer = window.setTimeout(() => {
+      setAutoSaveState('saving')
+      void onSaveRef.current(fields)
+        .then(() => {
+          if (infoSignature(latestInfoRef.current) === signature) {
+            setInfoDirty(false)
+            setAutoSaveState('saved')
+          }
+        })
+        .catch((reason) => {
+          setInfoError(reason instanceof Error ? reason.message : '保存失败，请重试')
+          setAutoSaveState('error')
+        })
+    }, 600)
+    return () => window.clearTimeout(timer)
+  }, [autoSaveRevision, description, endDate, infoDirty, startDate, targetCount, task.type, title])
 
   const applyTypeChange = async () => {
     if (!confirmTypeChange) return
@@ -134,9 +200,6 @@ export function TaskDetail({
   return (
     <section className="detail-view" aria-labelledby="detail-title">
       <header className="detail-header">
-        <button type="button" className="back-button" onClick={onBack} aria-label="返回任务列表">
-          <ArrowLeft /><span className="back-label">返回</span>
-        </button>
         <div>
           <span className="eyebrow">任务详情</span>
           <h1 id="detail-title">{task.title}</h1>
@@ -150,15 +213,27 @@ export function TaskDetail({
         <div className="detail-main">
           <section className="detail-section">
             <div className="section-title-row">
-              <div><span>01</span><h2>基本信息</h2></div>
-              <button type="button" className="text-button" onClick={() => void saveInfo()} disabled={saving}>
-                <Save /> {saving ? '保存中…' : '保存更改'}
-              </button>
+              <div><h2>基本信息</h2></div>
+              <span className={`autosave-status is-${autoSaveState}`} role="status">
+                {autoSaveState === 'saving' ? <LoaderCircle /> : autoSaveState === 'error' || autoSaveState === 'invalid' ? <CircleAlert /> : <CircleCheck />}
+                {autoSaveState === 'idle'
+                  ? '修改后自动保存'
+                  : autoSaveState === 'waiting'
+                    ? '等待自动保存'
+                    : autoSaveState === 'saving'
+                      ? '正在保存'
+                      : autoSaveState === 'saved'
+                        ? '已保存到本机'
+                        : autoSaveState === 'invalid'
+                          ? '需要修正'
+                          : '保存失败'}
+                {autoSaveState === 'error' && <button type="button" onClick={() => setAutoSaveRevision((value) => value + 1)}>重试</button>}
+              </span>
             </div>
             <div className="detail-fields">
               <label className="field-group full-width">
                 <span>任务名称</span>
-                <input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} />
+                <input value={title} maxLength={120} onChange={(event) => { setTitle(event.target.value); setInfoDirty(true) }} />
               </label>
               <label className="field-group full-width">
                 <span>任务描述 <small>可选</small></span>
@@ -167,16 +242,16 @@ export function TaskDetail({
                   maxLength={2000}
                   rows={4}
                   placeholder="补充任务背景、要求或完成标准"
-                  onChange={(event) => setDescription(event.target.value)}
+                  onChange={(event) => { setDescription(event.target.value); setInfoDirty(true) }}
                 />
               </label>
               <label className="field-group">
                 <span>开始时间 <small>可选</small></span>
-                <input type="datetime-local" step="60" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+                <input type="datetime-local" step="60" value={startDate} onChange={(event) => { setStartDate(event.target.value); setInfoDirty(true) }} />
               </label>
               <label className="field-group">
                 <span>结束时间 <small>可选</small></span>
-                <input type="datetime-local" step="60" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+                <input type="datetime-local" step="60" value={endDate} onChange={(event) => { setEndDate(event.target.value); setInfoDirty(true) }} />
               </label>
               <div className="date-fieldset-footer detail-date-footer full-width">
                 <small>开始和结束时间都留空时，任务仅显示在“全部”看板。</small>
@@ -187,6 +262,7 @@ export function TaskDetail({
                     onClick={() => {
                       setStartDate('')
                       setEndDate('')
+                      setInfoDirty(true)
                     }}
                   >
                     清除时间
@@ -201,16 +277,17 @@ export function TaskDetail({
                     min="1"
                     max="99999"
                     value={targetCount}
-                    onChange={(event) => setTargetCount(Number(event.target.value))}
+                    onChange={(event) => { setTargetCount(Number(event.target.value)); setInfoDirty(true) }}
                   />
                 </label>
               )}
             </div>
+            {infoError && <p className="form-error info-error" role="alert">{infoError}</p>}
           </section>
 
           <section className="detail-section">
             <div className="section-title-row">
-              <div><span>02</span><h2>任务类型</h2></div>
+              <div><h2>任务类型</h2></div>
             </div>
             <div className="type-selector detail-type-selector">
               <button
@@ -263,7 +340,7 @@ export function TaskDetail({
 
           <section className="detail-section">
             <div className="section-title-row">
-              <div><span>03</span><h2>当前状态</h2></div>
+              <div><h2>当前状态</h2></div>
             </div>
             {task.type === 'single' ? (
               <div className={`status-control single-status-control ${complete ? 'is-complete' : ''}`}>

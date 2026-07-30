@@ -1,4 +1,5 @@
-import { CalendarRange, Eye, Inbox, Layers3, Plus, SunMedium } from 'lucide-react'
+import { CalendarRange, Inbox, Layers3, MoveHorizontal, Plus, SunMedium, X } from 'lucide-react'
+import type { KeyboardEvent } from 'react'
 import { filterAndSortTasks, isTaskComplete } from '../lib/taskLogic'
 import type { BoardScope, Task } from '../types'
 import { TaskRow } from './TaskRow'
@@ -14,6 +15,8 @@ interface TaskBoardProps {
   onTaskAction: (task: Task, direction: 'positive' | 'negative') => Promise<boolean>
   onCreate: () => void
   onNotify: (message: string) => void
+  showSwipeHint?: boolean
+  onDismissSwipeHint?: () => void
 }
 
 const scopes: Array<{ id: BoardScope; label: string; icon: typeof Layers3 }> = [
@@ -39,10 +42,26 @@ export function TaskBoard({
   onTaskAction,
   onCreate,
   onNotify,
+  showSwipeHint = false,
+  onDismissSwipeHint,
 }: TaskBoardProps) {
   const visibleTasks = filterAndSortTasks(tasks, scope, hideCompleted, searchTerm)
   const active = visibleTasks.filter((task) => !isTaskComplete(task))
   const completed = visibleTasks.filter(isTaskComplete)
+
+  const handleScopeKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentScope: BoardScope) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const currentIndex = scopes.findIndex(({ id }) => id === currentScope)
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? scopes.length - 1
+        : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + scopes.length) % scopes.length
+    const nextScope = scopes[nextIndex].id
+    onScopeChange(nextScope)
+    document.getElementById(`scope-tab-${nextScope}`)?.focus()
+  }
 
   return (
     <section className="board-view" aria-labelledby="page-title">
@@ -54,11 +73,15 @@ export function TaskBoard({
         {scopes.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
+            id={`scope-tab-${id}`}
             type="button"
             role="tab"
             aria-selected={scope === id}
+            aria-controls="task-scope-panel"
+            tabIndex={scope === id ? 0 : -1}
             className={scope === id ? 'is-active' : ''}
             onClick={() => onScopeChange(id)}
+            onKeyDown={(event) => handleScopeKeyDown(event, id)}
           >
             <Icon />
             {label}
@@ -66,32 +89,46 @@ export function TaskBoard({
         ))}
       </div>
 
-      {loading ? (
-        <div className="task-skeleton" aria-label="正在加载任务">
-          {Array.from({ length: 6 }, (_, index) => (
-            <span key={index} />
-          ))}
+      {showSwipeHint && (
+        <div className="mobile-swipe-hint" role="note">
+          <MoveHorizontal />
+          <span><strong>左右滑动任务</strong><small>快速完成、推进或回退</small></span>
+          <button type="button" aria-label="知道了" onClick={onDismissSwipeHint}><X /></button>
         </div>
-      ) : visibleTasks.length === 0 ? (
-        <div className="empty-state">
-          <span className="empty-icon"><Inbox /></span>
-          <h2>{searchTerm ? '没有匹配的任务' : '这里还没有任务'}</h2>
-          <p>
-            {searchTerm
-              ? '换个关键词再试试。'
-              : scope === 'all'
-                ? '创建一个任务，时间可以稍后再安排。'
-                : '暂时没有落在这个时间范围内的任务。'}
-          </p>
-          {!searchTerm && (
-            <button type="button" className="primary-button" onClick={onCreate}>
-              <Plus />
-              新建任务
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="task-list" data-testid="task-list">
+      )}
+
+      <div
+        id="task-scope-panel"
+        role="tabpanel"
+        aria-labelledby={`scope-tab-${scope}`}
+        tabIndex={0}
+      >
+        {loading ? (
+          <div className="task-skeleton" aria-label="正在加载任务">
+            {Array.from({ length: 6 }, (_, index) => (
+              <span key={index} />
+            ))}
+          </div>
+        ) : visibleTasks.length === 0 ? (
+          <div className="empty-state">
+            <span className="empty-icon"><Inbox /></span>
+            <h2>{searchTerm ? '没有匹配的任务' : '这里还没有任务'}</h2>
+            <p>
+              {searchTerm
+                ? '换个关键词再试试。'
+                : scope === 'all'
+                  ? '创建一个任务，时间可以稍后再安排。'
+                  : '暂时没有落在这个时间范围内的任务。'}
+            </p>
+            {!searchTerm && (
+              <button type="button" className="primary-button" onClick={onCreate}>
+                <Plus />
+                新建任务
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="task-list" data-testid="task-list">
           {active.length > 0 && (
             <div className="task-group">
               <div className="task-group-heading">
@@ -115,7 +152,6 @@ export function TaskBoard({
               <div className="task-group-heading">
                 <span>已完成</span>
                 <strong>{completed.length}</strong>
-                <Eye aria-hidden="true" />
               </div>
               {completed.map((task) => (
                 <TaskRow
@@ -128,8 +164,9 @@ export function TaskBoard({
               ))}
             </div>
           )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </section>
   )
 }

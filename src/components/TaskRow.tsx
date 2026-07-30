@@ -56,6 +56,7 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
   }
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch' && event.clientX <= 24) return
     const button = (event.target as HTMLElement).closest('button')
     if (button && !button.classList.contains('task-detail-trigger')) return
     gesture.current = {
@@ -181,21 +182,6 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
           </button>
         </span>
 
-        <span className="task-status">
-          {task.type === 'progress' ? (
-            <>
-              <span className="task-count">
-                {task.count} / {task.targetCount}
-              </span>
-              <span className="progress-track" aria-label={`进度 ${progress}%`}>
-                <span style={{ width: `${progress}%` }} />
-              </span>
-            </>
-          ) : (
-            <span className="single-state">{task.completed ? '已完成' : '待完成'}</span>
-          )}
-        </span>
-
         {task.type === 'progress' && (
           <span className="task-inline-actions">
             <button
@@ -222,6 +208,21 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
             </button>
           </span>
         )}
+
+        <span className="task-status">
+          {task.type === 'progress' ? (
+            <>
+              <span className="task-count">
+                {task.count} / {task.targetCount}
+              </span>
+              <span className="progress-track" aria-label={`进度 ${progress}%`}>
+                <span style={{ width: `${progress}%` }} />
+              </span>
+            </>
+          ) : (
+            <span className="single-state">{task.completed ? '已完成' : '待完成'}</span>
+          )}
+        </span>
       </div>
     </div>
   )

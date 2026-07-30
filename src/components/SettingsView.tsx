@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { CheckCircle2, Cloud, Download, Eye, LogOut, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, CircleAlert, Cloud, CloudOff, Download, Eye, HardDrive, LoaderCircle, LogOut } from 'lucide-react'
 import type { PwaInstallState } from '../hooks/usePwaInstall'
+import type { SyncStatusPresentation } from '../lib/syncStatus'
 import type { UserPreferences } from '../types'
 
 interface SettingsViewProps {
@@ -9,6 +10,7 @@ interface SettingsViewProps {
   email: string
   photoURL?: string | null
   installState: PwaInstallState
+  syncStatus: SyncStatusPresentation
   onPreferencesChange: (next: UserPreferences) => Promise<void>
   onSignOut: () => Promise<void>
   onInstall: () => Promise<boolean>
@@ -21,6 +23,7 @@ export function SettingsView({
   email,
   photoURL,
   installState,
+  syncStatus,
   onPreferencesChange,
   onSignOut,
   onInstall,
@@ -28,6 +31,15 @@ export function SettingsView({
 }: SettingsViewProps) {
   const [showInstallHelp, setShowInstallHelp] = useState(false)
   const [installing, setInstalling] = useState(false)
+  const SyncIcon = syncStatus.kind === 'offline'
+    ? CloudOff
+    : syncStatus.kind === 'syncing'
+      ? LoaderCircle
+      : syncStatus.kind === 'error'
+        ? CircleAlert
+        : syncStatus.kind === 'local'
+          ? HardDrive
+          : CheckCircle2
 
   const handleInstall = async () => {
     if (installState === 'installed') return
@@ -63,13 +75,13 @@ export function SettingsView({
         </section>
 
         <section className="settings-section">
-          <div className="settings-section-heading"><Cloud /><div><h2>账号与同步</h2><p>任务按照 Google 账号独立保存。</p></div></div>
+          <div className="settings-section-heading"><Cloud /><div><h2>账号与同步</h2><p>{syncStatus.detail}</p></div></div>
           <div className="account-card">
             <span className="avatar large">
               {photoURL ? <img src={photoURL} alt="" referrerPolicy="no-referrer" /> : displayName.slice(0, 1)}
             </span>
             <span><strong>{displayName}</strong><small>{email}</small></span>
-            <span className="cloud-badge"><ShieldCheck /> 已安全同步</span>
+            <span className={`cloud-badge is-${syncStatus.kind}`} role="status"><SyncIcon /> {syncStatus.title}</span>
           </div>
           <button type="button" className="secondary-button" onClick={() => void onSignOut()}><LogOut /> 退出登录</button>
         </section>
