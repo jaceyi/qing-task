@@ -20,6 +20,14 @@ export function normalizeDateTimeInput(value: string, boundary: 'start' | 'end' 
   return `${value}T${boundary === 'start' ? '00:00' : '23:59'}`
 }
 
+export function formatDateTimeDisplay(value: string) {
+  if (!value) return '未设置'
+  const [date = '', time = ''] = value.split('T')
+  const [year, month, day] = date.split('-')
+  if (!year || !month || !day) return value
+  return `${year}/${month}/${day}${time ? ` ${time.slice(0, 5)}` : ''}`
+}
+
 export function parseLocalDate(value: string, boundary: 'start' | 'end' = 'start') {
   if (!value) return null
   const normalized = normalizeDateTimeInput(value, boundary)

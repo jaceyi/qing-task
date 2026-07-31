@@ -15,6 +15,7 @@ import {
 import { formatLogDate, normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
 import { isTaskComplete } from '../lib/taskLogic'
 import type { Task, TaskLog, TaskType } from '../types'
+import { DateTimeInput } from './DateTimeInput'
 
 interface TaskDetailProps {
   task: Task
@@ -247,11 +248,19 @@ export function TaskDetail({
               </label>
               <label className="field-group">
                 <span>开始时间 <small>可选</small></span>
-                <input type="datetime-local" step="60" value={startDate} onChange={(event) => { setStartDate(event.target.value); setInfoDirty(true) }} />
+                <DateTimeInput
+                  ariaLabel="开始时间"
+                  value={startDate}
+                  onChange={(value) => { setStartDate(value); setInfoDirty(true) }}
+                />
               </label>
               <label className="field-group">
                 <span>结束时间 <small>可选</small></span>
-                <input type="datetime-local" step="60" value={endDate} onChange={(event) => { setEndDate(event.target.value); setInfoDirty(true) }} />
+                <DateTimeInput
+                  ariaLabel="结束时间"
+                  value={endDate}
+                  onChange={(value) => { setEndDate(value); setInfoDirty(true) }}
+                />
               </label>
               <div className="date-fieldset-footer detail-date-footer full-width">
                 <small>开始和结束时间都留空时，任务仅显示在“全部”看板。</small>

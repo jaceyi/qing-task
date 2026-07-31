@@ -38,6 +38,8 @@
 html {
   min-width: 320px;
   min-height: 100%;
+  max-width: 100%;
+  overscroll-behavior-x: none;
   background: var(--base);
 }
 
@@ -46,7 +48,9 @@ body {
   min-width: 320px;
   min-height: 100vh;
   min-height: 100svh;
-  overflow-x: hidden;
+  max-width: 100%;
+  overflow-x: clip;
+  overscroll-behavior-x: none;
 }
 
 button,

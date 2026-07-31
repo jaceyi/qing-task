@@ -542,7 +542,9 @@
   overflow: hidden;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
-  touch-action: pan-y;
+  touch-action: pan-y pinch-zoom;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
 }
 
 .swipe-underlay {
@@ -595,7 +597,7 @@
   padding: 0 8px;
   background: var(--surface);
   transition: transform 180ms cubic-bezier(0.2, 0.78, 0.32, 1), background 150ms ease;
-  cursor: default;
+  cursor: pointer;
   user-select: none;
 }
 
@@ -1314,6 +1316,81 @@ input[role="switch"]:checked::after {
 .inline-confirm input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(125, 141, 225, 0.12);
+}
+
+.date-time-control {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 44px;
+  padding: 0 38px 0 12px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  contain: layout paint;
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: white;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.date-time-control.has-value {
+  color: var(--ink);
+}
+
+.date-time-control:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(125, 141, 225, 0.12);
+}
+
+.date-time-value {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.date-time-control > svg {
+  position: absolute;
+  right: 12px;
+  width: 17px;
+  height: 17px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.field-group .date-time-control input,
+.date-time-control input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  border: 0;
+  border-radius: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.field-group .date-time-control input:focus,
+.date-time-control input:focus {
+  border: 0;
+  box-shadow: none;
 }
 
 .field-group > span small {
@@ -2422,11 +2499,27 @@ input[role="switch"]:checked::after {
 }
 
 @media (max-width: 900px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: auto;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
   .app-shell {
     display: block;
     min-height: 100svh;
     padding-bottom: 0;
     background: white;
+    overscroll-behavior-y: auto;
   }
 
   .app-shell.has-bottom-nav {
@@ -2459,7 +2552,7 @@ input[role="switch"]:checked::after {
   .mobile-top-title strong {
     overflow: hidden;
     color: var(--ink);
-    font-size: 17px;
+    font-size: 18px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -2565,7 +2658,7 @@ input[role="switch"]:checked::after {
     gap: 6px;
     color: #656477;
     background: transparent;
-    font-size: 13px;
+    font-size: 14px;
     cursor: pointer;
   }
 
@@ -2607,13 +2700,13 @@ input[role="switch"]:checked::after {
   }
 
   .mobile-swipe-hint strong {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .mobile-swipe-hint small {
     overflow: hidden;
     color: var(--muted);
-    font-size: 9px;
+    font-size: 10px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -2653,6 +2746,7 @@ input[role="switch"]:checked::after {
     grid-template-columns: 30px minmax(0, 1fr) 86px;
     gap: 9px;
     padding: 0 2px;
+    touch-action: pan-y pinch-zoom;
   }
 
   .task-check {
@@ -2668,11 +2762,24 @@ input[role="switch"]:checked::after {
   }
 
   .task-title {
-    font-size: 14px;
+    font-size: 15px;
   }
 
   .task-date {
-    font-size: 10px;
+    font-size: 11px;
+  }
+
+  .single-state {
+    font-size: 12px;
+  }
+
+  .task-count {
+    font-size: 13px;
+  }
+
+  .task-group-heading > span,
+  .swipe-underlay {
+    font-size: 14px;
   }
 
   .task-status {
@@ -2737,7 +2844,7 @@ input[role="switch"]:checked::after {
     border: 0;
     border-radius: 9999px;
     background: transparent;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     line-height: 1.1;
     cursor: pointer;
@@ -2821,6 +2928,44 @@ input[role="switch"]:checked::after {
     padding: 22px 18px 120px;
   }
 
+  .field-group > span,
+  .field-group legend,
+  .date-grid label > span {
+    font-size: 14px;
+  }
+
+  .field-group > span small,
+  .date-fieldset legend small,
+  .type-selector small {
+    font-size: 11px;
+  }
+
+  .field-group small,
+  .date-fieldset > small,
+  .date-fieldset-footer > small {
+    font-size: 12px;
+  }
+
+  .type-selector strong {
+    font-size: 14px;
+  }
+
+  .date-time-control {
+    height: 48px;
+    padding-inline: 14px 42px;
+    border-radius: 10px;
+  }
+
+  .date-time-value {
+    font-size: 16px;
+  }
+
+  .date-time-control > svg {
+    right: 14px;
+    width: 18px;
+    height: 18px;
+  }
+
   .panel-actions {
     width: 100%;
     padding-right: calc(20px + env(safe-area-inset-right));
@@ -2847,7 +2992,7 @@ input[role="switch"]:checked::after {
   }
 
   .detail-header h1 {
-    font-size: 18px;
+    font-size: 20px;
   }
 
 
@@ -2860,6 +3005,51 @@ input[role="switch"]:checked::after {
   .settings-section {
     padding: 17px;
     border-radius: 11px;
+  }
+
+  .section-title-row h2,
+  .danger-section h2,
+  .settings-section h2 {
+    font-size: 15px;
+  }
+
+  .autosave-status {
+    font-size: 11px;
+  }
+
+  .muted-copy,
+  .settings-section-heading p,
+  .install-help p,
+  .single-status-control p,
+  .inline-confirm p,
+  .progress-readout small,
+  .danger-section p {
+    font-size: 12px;
+  }
+
+  .setting-row strong,
+  .install-help strong,
+  .account-card strong,
+  .inline-confirm strong {
+    font-size: 14px;
+  }
+
+  .setting-row small,
+  .account-card small,
+  .cloud-badge,
+  .inline-confirm label {
+    font-size: 11px;
+  }
+
+  .form-error {
+    font-size: 13px;
+  }
+
+  .primary-button,
+  .secondary-button,
+  .danger-button,
+  .text-button {
+    font-size: 14px;
   }
 
   .log-panel {
@@ -2971,17 +3161,15 @@ input[role="switch"]:checked::after {
 
   .date-grid,
   .date-grid label,
-  .date-grid input[type="datetime-local"] {
+  .date-time-control {
     width: 100%;
     min-width: 0;
     max-width: 100%;
   }
 
-  .date-grid input[type="datetime-local"] {
+  .date-time-control {
     height: 48px;
     min-height: 48px;
-    padding-inline: 10px;
-    font-size: 16px;
   }
 
   .single-status-control {
