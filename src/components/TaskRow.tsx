@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { CalendarOff, Check, Minus, Plus, X } from 'lucide-react'
 import { formatDateRange } from '../lib/date'
 import { isTaskComplete } from '../lib/taskLogic'
@@ -16,11 +16,14 @@ interface TaskRowProps {
 export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
   const [offset, setOffset] = useState(0)
   const [acting, setActing] = useState(false)
+  const rowRef = useRef<HTMLDivElement>(null)
+  const dragClickResetTimer = useRef<number | undefined>(undefined)
   const gesture = useRef({
     startX: 0,
     startY: 0,
     dragged: false,
     horizontal: false,
+    vertical: false,
     active: false,
     lastOffset: 0,
   })
@@ -28,6 +31,39 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
   const positiveDisabled = task.type === 'single' ? task.completed : task.count >= task.targetCount
   const negativeDisabled = task.type === 'single' ? !task.completed : task.count <= 0
   const progress = task.type === 'progress' ? Math.round((task.count / task.targetCount) * 100) : 0
+
+  useEffect(() => {
+    const row = rowRef.current
+    if (!row) return
+    const keepHorizontalGesture = (event: TouchEvent) => {
+      if (!gesture.current.active || event.touches.length !== 1) return
+
+      if (gesture.current.vertical) return
+      if (gesture.current.horizontal) {
+        if (event.cancelable) event.preventDefault()
+        return
+      }
+
+      const touch = event.touches[0]
+      const deltaX = touch.clientX - gesture.current.startX
+      const deltaY = touch.clientY - gesture.current.startY
+
+      if (Math.abs(deltaX) < 5 && Math.abs(deltaY) < 5) return
+
+      if (Math.abs(deltaX) >= Math.abs(deltaY) * 0.8) {
+        gesture.current.horizontal = true
+        if (event.cancelable) event.preventDefault()
+      } else if (Math.abs(deltaY) > 8) {
+        gesture.current.vertical = true
+        gesture.current.active = false
+      }
+    }
+    row.addEventListener('touchmove', keepHorizontalGesture, { passive: false })
+    return () => {
+      row.removeEventListener('touchmove', keepHorizontalGesture)
+      window.clearTimeout(dragClickResetTimer.current)
+    }
+  }, [])
 
   const performAction = async (direction: SwipeDirection) => {
     if (acting) return
@@ -64,6 +100,7 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
       startY: event.clientY,
       dragged: false,
       horizontal: false,
+      vertical: false,
       active: true,
       lastOffset: 0,
     }
@@ -73,10 +110,19 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
     if (!gesture.current.active) return
     const deltaX = event.clientX - gesture.current.startX
     const deltaY = event.clientY - gesture.current.startY
-    if (!gesture.current.horizontal && Math.abs(deltaY) > Math.abs(deltaX) + 8) return
-    if (Math.abs(deltaX) > 6) {
+    if (!gesture.current.horizontal && !gesture.current.vertical) {
+      if (Math.abs(deltaX) < 5 && Math.abs(deltaY) < 5) return
+      if (Math.abs(deltaX) >= Math.abs(deltaY) * 0.8) {
+        gesture.current.horizontal = true
+      } else if (Math.abs(deltaY) > 8) {
+        gesture.current.vertical = true
+        gesture.current.active = false
+        return
+      }
+    }
+    if (gesture.current.horizontal) {
+      event.preventDefault()
       gesture.current.dragged = true
-      gesture.current.horizontal = true
       if (!event.currentTarget.hasPointerCapture?.(event.pointerId)) {
         event.currentTarget.setPointerCapture?.(event.pointerId)
       }
@@ -94,6 +140,12 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
     }
     const releasedOffset = gesture.current.lastOffset
     gesture.current.lastOffset = 0
+    if (gesture.current.dragged) {
+      window.clearTimeout(dragClickResetTimer.current)
+      dragClickResetTimer.current = window.setTimeout(() => {
+        gesture.current.dragged = false
+      }, 250)
+    }
     if (releasedOffset > 54) void performAction('positive')
     else if (releasedOffset < -54) void performAction('negative')
     else setOffset(0)
@@ -101,10 +153,16 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
 
   const handleOpen = () => {
     if (gesture.current.dragged) {
+      window.clearTimeout(dragClickResetTimer.current)
       gesture.current.dragged = false
       return
     }
     onOpen()
+  }
+
+  const handleRowClick = (event: MouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('.task-check, .task-inline-actions button')) return
+    handleOpen()
   }
 
   return (
@@ -122,13 +180,18 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
         <span>{task.type === 'single' ? '取消' : '回退'}</span>
       </div>
       <div
+        ref={rowRef}
         className={`task-row is-${task.type}`}
         style={{ transform: `translateX(${offset}px)` }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onClick={handleRowClick}
         onPointerCancel={() => {
           gesture.current.active = false
+          gesture.current.dragged = false
+          gesture.current.horizontal = false
+          gesture.current.vertical = false
           gesture.current.lastOffset = 0
           setOffset(0)
         }}
@@ -172,7 +235,10 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
             type="button"
             className="task-copy task-detail-trigger"
             aria-label={`打开任务：${task.title}`}
-            onClick={handleOpen}
+            onClick={(event) => {
+              event.stopPropagation()
+              handleOpen()
+            }}
           >
             <span className="task-title">{task.title}</span>
             <span className={`task-date ${!task.startDate && !task.endDate ? 'is-timeless' : ''}`}>

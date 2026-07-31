@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, CalendarDays, Check, Layers3, X } from 'lucide-react'
 import { normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
 import type { Task, TaskDraft, TaskType } from '../types'
+import { DateTimeInput } from './DateTimeInput'
 
 interface TaskFormPanelProps {
   sourceTask?: Task | null
@@ -276,20 +277,18 @@ export function TaskFormPanel({
             <div className="date-grid">
               <label>
                 <span>开始时间</span>
-                <input
-                  type="datetime-local"
-                  step="60"
+                <DateTimeInput
+                  ariaLabel="开始时间"
                   value={draft.startDate}
-                  onChange={(event) => setDraft({ ...draft, startDate: event.target.value })}
+                  onChange={(value) => setDraft({ ...draft, startDate: value })}
                 />
               </label>
               <label>
                 <span>结束时间</span>
-                <input
-                  type="datetime-local"
-                  step="60"
+                <DateTimeInput
+                  ariaLabel="结束时间"
                   value={draft.endDate}
-                  onChange={(event) => setDraft({ ...draft, endDate: event.target.value })}
+                  onChange={(value) => setDraft({ ...draft, endDate: value })}
                 />
               </label>
             </div>
