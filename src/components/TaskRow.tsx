@@ -209,10 +209,19 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
             {complete && <Check />}
           </button>
         ) : (
-          <span
+          <button
+            type="button"
             className={`task-progress-indicator ${complete ? 'is-complete' : ''}`}
-            role="img"
-            aria-label={`当前进度 ${task.count}/${task.targetCount}`}
+            aria-label={
+              positiveDisabled
+                ? `进度已完成：${task.title}`
+                : `推进一次：${task.title}，当前进度 ${task.count}/${task.targetCount}`
+            }
+            disabled={positiveDisabled || acting}
+            onClick={(event) => {
+              event.stopPropagation()
+              void performAction('positive')
+            }}
           >
             <svg viewBox="0 0 26 26" aria-hidden="true">
               <circle className="task-progress-ring-track" cx="13" cy="13" r="10" pathLength="100" />
@@ -227,7 +236,7 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
               />
             </svg>
             <span className="task-progress-center">{complete && <Check />}</span>
-          </span>
+          </button>
         )}
 
         <span className="task-copy-cell">

@@ -128,23 +128,39 @@ describe('任务行手势', () => {
     expect(container.querySelector('.swipe-underlay-negative .lucide-check')).not.toBeInTheDocument()
   })
 
-  it('进度环本身不执行进度操作，但可通过整行热区打开详情', () => {
+  it('点击进度环推进一次，且不会打开详情', async () => {
     const onOpen = vi.fn()
+    const onAction = vi.fn(async () => true)
     const { container } = render(
       <TaskRow
         task={progressTask}
         onOpen={onOpen}
+        onAction={onAction}
+        onNotify={vi.fn()}
+      />,
+    )
+
+    const progressIndicator = within(container).getByRole('button', {
+      name: '推进一次：测试进度任务，当前进度 2/5',
+    })
+    expect(within(container).queryByRole('button', { name: '完成任务：测试进度任务' })).not.toBeInTheDocument()
+
+    fireEvent.click(progressIndicator)
+    await waitFor(() => expect(onAction).toHaveBeenCalledWith('positive'))
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('进度达到目标后圆环不可继续增加', () => {
+    const { container } = render(
+      <TaskRow
+        task={{ ...progressTask, count: 5 }}
+        onOpen={vi.fn()}
         onAction={vi.fn(async () => true)}
         onNotify={vi.fn()}
       />,
     )
 
-    const progressIndicator = within(container).getByRole('img', { name: '当前进度 2/5' })
-    expect(progressIndicator.tagName).toBe('SPAN')
-    expect(within(container).queryByRole('button', { name: '完成任务：测试进度任务' })).not.toBeInTheDocument()
-
-    fireEvent.click(progressIndicator)
-    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(within(container).getByRole('button', { name: '进度已完成：测试进度任务' })).toBeDisabled()
   })
 
   it('将进度操作放在进度展示之前，让状态列固定在最右侧', () => {
