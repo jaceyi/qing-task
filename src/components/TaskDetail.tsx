@@ -10,33 +10,55 @@ import {
   LoaderCircle,
   Minus,
   Plus,
+  Repeat2,
   Trash2,
 } from 'lucide-react'
 import { formatLogDate, normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
+import { nextOccurrence, parseLocalDateTime } from '../lib/recurrence'
 import { isTaskComplete } from '../lib/taskLogic'
-import type { Task, TaskLog, TaskType } from '../types'
+import type { RecurrenceRule, Tag, Task, TaskInfoFields, TaskLog, TaskType } from '../types'
 import { DateTimeInput } from './DateTimeInput'
+import { RecurrenceEditor } from './RecurrenceEditor'
+import { TagPicker } from './TagPicker'
 
 interface TaskDetailProps {
   task: Task
   logs: TaskLog[]
   logsError: string
   onCopy: () => void
-  onSave: (
-    fields: Pick<Task, 'title' | 'description' | 'startDate' | 'endDate' | 'targetCount'>,
-  ) => Promise<void>
+  onSave: (fields: TaskInfoFields) => Promise<void>
   onChangeType: (nextType: TaskType, targetCount?: number) => Promise<void>
   onSetCompleted: (completed: boolean) => Promise<boolean>
   onAdjust: (delta: -1 | 1) => Promise<boolean>
   onDelete: () => Promise<void>
+  onSkipOccurrence?: () => Promise<boolean>
   onNotify: (message: string) => void
+  onRecurrenceAdvanced?: (message: string) => void
   onDirtyChange?: (dirty: boolean) => void
+  tags?: Tag[]
+  onCreateTag?: (name: string) => Promise<Tag>
 }
 
 type AutoSaveState = 'idle' | 'waiting' | 'saving' | 'saved' | 'error' | 'invalid'
 
-function infoSignature(fields: Pick<Task, 'title' | 'description' | 'startDate' | 'endDate' | 'targetCount'>) {
+function infoSignature(fields: TaskInfoFields) {
   return JSON.stringify(fields)
+}
+
+function validateInfoFields(fields: TaskInfoFields, taskType: TaskType) {
+  if (!fields.title.trim()) return '任务名称不能为空'
+  const dateError = validateTaskDateRange(fields.startDate, fields.endDate)
+  if (dateError) return dateError
+  if (taskType === 'progress' && fields.targetCount < 1) return '目标次数至少为 1'
+  if (!fields.recurrence) return ''
+  if (!fields.startDate || !fields.endDate) return '重复任务必须设置完整时间'
+  if (fields.recurrence.end.kind === 'until' && fields.recurrence.end.date < fields.startDate.slice(0, 10)) return '重复截止日期不能早于任务开始日期'
+  const currentStart = parseLocalDateTime(fields.startDate)
+  const currentEnd = parseLocalDateTime(fields.endDate)
+  const next = currentStart ? nextOccurrence(fields, currentStart) : null
+  const nextStart = next ? parseLocalDateTime(next.startDate) : null
+  if (currentEnd && nextStart && currentEnd >= nextStart) return '当前时间范围与下一次重复时间重叠'
+  return ''
 }
 
 function describeLog(log: TaskLog) {
@@ -65,14 +87,21 @@ export function TaskDetail({
   onSetCompleted,
   onAdjust,
   onDelete,
+  onSkipOccurrence,
   onNotify,
+  onRecurrenceAdvanced,
   onDirtyChange,
+  tags = [],
+  onCreateTag = async () => { throw new Error('暂时无法创建标签') },
 }: TaskDetailProps) {
   const [title, setTitle] = useState(task.title)
   const [description, setDescription] = useState(task.description)
   const [startDate, setStartDate] = useState(() => normalizeDateTimeInput(task.startDate, 'start'))
   const [endDate, setEndDate] = useState(() => normalizeDateTimeInput(task.endDate, 'end'))
   const [targetCount, setTargetCount] = useState(task.targetCount || 5)
+  const [recurrence, setRecurrence] = useState<RecurrenceRule | null>(task.recurrence ?? null)
+  const [tagIds, setTagIds] = useState(task.tagIds ?? [])
+  const [recurrenceTimingScope, setRecurrenceTimingScope] = useState<'current' | 'future'>('current')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [infoError, setInfoError] = useState('')
@@ -82,7 +111,7 @@ export function TaskDetail({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmTypeChange, setConfirmTypeChange] = useState<TaskType | null>(null)
   const onSaveRef = useRef(onSave)
-  const latestInfoRef = useRef({ title, description, startDate, endDate, targetCount })
+  const latestInfoRef = useRef({ title, description, startDate, endDate, targetCount, recurrence, tagIds, recurrenceTimingScope })
   const infoDirtyRef = useRef(infoDirty)
   const autoSaveStateRef = useRef(autoSaveState)
   const taskTypeRef = useRef(task.type)
@@ -100,9 +129,11 @@ export function TaskDetail({
     setStartDate(normalizeDateTimeInput(task.startDate, 'start'))
     setEndDate(normalizeDateTimeInput(task.endDate, 'end'))
     setTargetCount(task.targetCount || 5)
+    setRecurrence(task.recurrence ?? null)
+    setTagIds(task.tagIds ?? [])
   }, [infoDirty, task])
 
-  latestInfoRef.current = { title, description, startDate, endDate, targetCount }
+  latestInfoRef.current = { title, description, startDate, endDate, targetCount, recurrence, tagIds, recurrenceTimingScope }
   infoDirtyRef.current = infoDirty
   autoSaveStateRef.current = autoSaveState
   taskTypeRef.current = task.type
@@ -110,11 +141,7 @@ export function TaskDetail({
   useEffect(() => () => {
     if (!infoDirtyRef.current || autoSaveStateRef.current === 'saving') return
     const fields = latestInfoRef.current
-    const dateError = validateTaskDateRange(fields.startDate, fields.endDate)
-    const invalid = !fields.title.trim()
-      || Boolean(dateError)
-      || (taskTypeRef.current === 'progress' && fields.targetCount < 1)
-    if (!invalid) void onSaveRef.current(fields)
+    if (!validateInfoFields(fields, taskTypeRef.current)) void onSaveRef.current(fields)
   }, [])
 
   useEffect(() => {
@@ -134,12 +161,9 @@ export function TaskDetail({
 
   useEffect(() => {
     if (!infoDirty) return
-    const fields = { title, description, startDate, endDate, targetCount }
+    const fields = { title, description, startDate, endDate, targetCount, recurrence, tagIds, recurrenceTimingScope }
     const signature = infoSignature(fields)
-    const dateError = validateTaskDateRange(startDate, endDate)
-    const validationError = !title.trim()
-      ? '任务名称不能为空'
-      : dateError || (task.type === 'progress' && targetCount < 1 ? '目标次数至少为 1' : '')
+    const validationError = validateInfoFields(fields, task.type)
     if (validationError) {
       setInfoError(validationError)
       setAutoSaveState('invalid')
@@ -163,7 +187,7 @@ export function TaskDetail({
         })
     }, 600)
     return () => window.clearTimeout(timer)
-  }, [autoSaveRevision, description, endDate, infoDirty, startDate, targetCount, task.type, title])
+  }, [autoSaveRevision, description, endDate, infoDirty, recurrence, recurrenceTimingScope, startDate, tagIds, targetCount, task.type, title])
 
   const applyTypeChange = async () => {
     if (!confirmTypeChange) return
@@ -186,6 +210,16 @@ export function TaskDetail({
         ? await onSetCompleted(direction > 0)
         : await onAdjust(direction)
     if (changed) {
+      const advancesRecurrence = Boolean(
+        task.recurrence
+        && task.seriesState !== 'ended'
+        && direction > 0
+        && (task.type === 'single' || task.count + 1 === task.targetCount),
+      )
+      if (advancesRecurrence) {
+        onRecurrenceAdvanced?.(task.type === 'progress' ? `本次 ${task.targetCount}/${task.targetCount} 已完成，下一次已从 0/${task.targetCount} 开始` : '已完成本次，下一次已安排')
+        return
+      }
       onNotify(
         task.type === 'single'
           ? direction > 0
@@ -278,6 +312,15 @@ export function TaskDetail({
                   </button>
                 )}
               </div>
+              {task.recurrence && (startDate !== normalizeDateTimeInput(task.startDate, 'start') || endDate !== normalizeDateTimeInput(task.endDate, 'end')) && (
+                <div className="recurrence-scope-control full-width" role="group" aria-label="时间修改范围">
+                  <span>时间修改范围</span>
+                  <div>
+                    <button type="button" className={recurrenceTimingScope === 'current' ? 'is-active' : ''} onClick={() => setRecurrenceTimingScope('current')}>仅本次</button>
+                    <button type="button" className={recurrenceTimingScope === 'future' ? 'is-active' : ''} onClick={() => setRecurrenceTimingScope('future')}>本次及以后</button>
+                  </div>
+                </div>
+              )}
               {task.type === 'progress' && (
                 <label className="field-group">
                   <span>目标次数</span>
@@ -292,6 +335,35 @@ export function TaskDetail({
               )}
             </div>
             {infoError && <p className="form-error info-error" role="alert">{infoError}</p>}
+          </section>
+
+          <section className="detail-section plan-section">
+            <div className="section-title-row">
+              <div><Repeat2 /><h2>计划与标签</h2></div>
+            </div>
+            <RecurrenceEditor
+              compact
+              value={recurrence}
+              startDate={startDate}
+              endDate={endDate}
+              onChange={(next) => { setRecurrence(next); setInfoDirty(true) }}
+            />
+            <TagPicker
+              compact
+              tags={tags}
+              selectedTagIds={tagIds}
+              onChange={(next) => { setTagIds(next); setInfoDirty(true) }}
+              onCreateTag={onCreateTag}
+            />
+            {task.recurrence && task.seriesState !== 'ended' && onSkipOccurrence && (
+              <button
+                type="button"
+                className="secondary-button compact skip-occurrence-button"
+                onClick={async () => {
+                  if (await onSkipOccurrence()) onRecurrenceAdvanced?.('已跳过本次，下一次已安排')
+                }}
+              >跳过本次</button>
+            )}
           </section>
 
           <section className="detail-section">

@@ -86,4 +86,32 @@ describe('任务状态逻辑', () => {
       count: 2,
     })
   })
+
+  it('按多个标签匹配全部或任一，并允许搜索标签名', () => {
+    const tasks = [
+      { ...baseTask, id: 'both', tagIds: ['a', 'b'] },
+      { ...baseTask, id: 'one', tagIds: ['a'] },
+    ]
+    const tags = [
+      { id: 'a', name: '工作', normalizedName: '工作', color: 'lavender' as const, sortOrder: 1, createdAt: null, updatedAt: null },
+      { id: 'b', name: '等待', normalizedName: '等待', color: 'mint' as const, sortOrder: 2, createdAt: null, updatedAt: null },
+    ]
+    const reference = new Date(2026, 6, 28)
+    expect(filterAndSortTasks(tasks, 'all', false, '', reference, { tags, selectedTagIds: ['a', 'b'], matchMode: 'all' }).map((task) => task.id)).toEqual(['both'])
+    expect(filterAndSortTasks(tasks, 'all', false, '', reference, { tags, selectedTagIds: ['a', 'b'], matchMode: 'any' })).toHaveLength(2)
+    expect(filterAndSortTasks(tasks, 'all', false, '等待', reference, { tags }).map((task) => task.id)).toEqual(['both'])
+  })
+
+  it('标签看板可叠加自定义时间范围', () => {
+    const tasks = [
+      { ...baseTask, id: 'inside', tagIds: ['a'] },
+      { ...baseTask, id: 'outside', tagIds: ['a'], startDate: '2026-08-02', endDate: '2026-08-02' },
+      { ...baseTask, id: 'other-tag', tagIds: ['b'] },
+    ]
+    const result = filterAndSortTasks(tasks, 'custom', false, '', new Date(2026, 6, 28), {
+      selectedTagIds: ['a'],
+      customRange: { startDate: '2026-07-20', endDate: '2026-07-31' },
+    })
+    expect(result.map((task) => task.id)).toEqual(['inside'])
+  })
 })

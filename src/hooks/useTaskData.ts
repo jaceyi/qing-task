@@ -1,20 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { demoTasks } from '../data/demo'
+import { demoTags, demoTasks } from '../data/demo'
+import { nextOccurrence, occurrenceKey } from '../lib/recurrence'
+import { cleanTagName, normalizeTagName, sortTags } from '../lib/tagLogic'
 import { normalizeTaskDraft, switchedTaskValues, updatedTaskInfo } from '../lib/taskLogic'
 import {
   adjustTaskProgress,
   changeTaskType,
+  createTag as createRemoteTag,
   createTask as createRemoteTask,
+  deleteTag as deleteRemoteTag,
   deleteTask as deleteRemoteTask,
+  mergeTags as mergeRemoteTags,
   savePreferences,
   setSingleCompletion,
+  skipRecurringOccurrence,
   subscribePreferences,
+  subscribeTags,
   subscribeTaskLogs,
   subscribeTasks,
+  undoRecurringAdvance,
+  updateTag as updateRemoteTag,
   updateTaskInfo,
 } from '../lib/taskService'
 import type {
   SyncState,
+  Tag,
+  TagColor,
   Task,
   TaskDraft,
   TaskInfoFields,
@@ -27,6 +38,7 @@ const initialSyncState: SyncState = { fromCache: false, pendingWrites: false }
 
 export function useTaskData(userId: string | null, demoMode: boolean) {
   const [tasks, setTasks] = useState<Task[]>(demoMode ? demoTasks : [])
+  const [tags, setTags] = useState<Tag[]>(demoMode ? demoTags : [])
   const [preferences, setPreferencesState] = useState<UserPreferences>({ hideCompleted: false })
   const [loading, setLoading] = useState(!demoMode)
   const [error, setError] = useState('')
@@ -34,11 +46,19 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
   const [pendingOperations, setPendingOperations] = useState(0)
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null)
   const tasksRef = useRef(tasks)
+  const tagsRef = useRef(tags)
+  const lastAdvanceRef = useRef<{ previous: Task; expiresAt: number } | null>(null)
 
   const replaceTasks = useCallback((next: Task[] | ((current: Task[]) => Task[])) => {
     const resolved = typeof next === 'function' ? next(tasksRef.current) : next
     tasksRef.current = resolved
     setTasks(resolved)
+  }, [])
+
+  const replaceTags = useCallback((next: Tag[] | ((current: Tag[]) => Tag[])) => {
+    const resolved = typeof next === 'function' ? next(tagsRef.current) : next
+    tagsRef.current = sortTags(resolved)
+    setTags(tagsRef.current)
   }, [])
 
   const monitorCommit = useCallback((committed: Promise<void>, action: string) => {
@@ -55,12 +75,14 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
   useEffect(() => {
     if (demoMode) {
       replaceTasks(demoTasks)
+      replaceTags(demoTags)
       setLoadedUserId(null)
       setLoading(false)
       return
     }
     if (!userId) {
       replaceTasks([])
+      replaceTags([])
       setLoadedUserId(null)
       setLoading(false)
       return
@@ -82,11 +104,13 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
       },
     )
     const unsubscribePreferences = subscribePreferences(userId, setPreferencesState)
+    const unsubscribeTags = subscribeTags(userId, replaceTags, (reason) => setError(reason.message))
     return () => {
       unsubscribeTasks()
       unsubscribePreferences()
+      unsubscribeTags()
     }
-  }, [demoMode, replaceTasks, userId])
+  }, [demoMode, replaceTags, replaceTasks, userId])
 
   const createTask = useCallback(
     async (draft: TaskDraft, copiedFrom?: string) => {
@@ -96,7 +120,19 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
       const id = mutation?.result ?? `demo-${crypto.randomUUID()}`
       const now = new Date()
       replaceTasks((current) => [
-        { ...normalized, id, createdAt: now, updatedAt: now },
+        {
+          ...normalized,
+          id,
+          schemaVersion: 2,
+          tagIds: normalized.tagIds ?? [],
+          recurrence: normalized.recurrence ?? null,
+          seriesState: normalized.recurrence ? 'active' : null,
+          currentOccurrenceKey: normalized.recurrence ? occurrenceKey(normalized.startDate) : null,
+          occurrenceSequence: normalized.recurrence ? 1 : 0,
+          lastAdvanceMutationId: null,
+          createdAt: now,
+          updatedAt: now,
+        },
         ...current.filter((task) => task.id !== id),
       ])
       if (mutation) monitorCommit(mutation.committed, '创建任务')
@@ -111,11 +147,25 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
       const current = tasksRef.current.find((task) => task.id === taskId)
       if (!current) throw new Error('任务不存在')
       const next = updatedTaskInfo(current, fields)
+      const recurrenceChanged = JSON.stringify(current.recurrence ?? null) !== JSON.stringify(next.recurrence ?? null)
       const mutation = demoMode ? null : updateTaskInfo(userId!, current, fields)
       if (mutation && !mutation.result) return
       replaceTasks((tasks) =>
         tasks.map((task) =>
-          task.id === taskId ? { ...task, ...next, updatedAt: new Date() } : task,
+          task.id === taskId
+            ? {
+                ...task,
+                ...next,
+                ...(recurrenceChanged
+                  ? {
+                      seriesState: next.recurrence ? 'active' as const : null,
+                      currentOccurrenceKey: next.recurrence ? occurrenceKey(next.startDate) : null,
+                      occurrenceSequence: next.recurrence ? Math.max(1, task.occurrenceSequence ?? 1) : 0,
+                    }
+                  : {}),
+                updatedAt: new Date(),
+              }
+            : task,
         ),
       )
       if (mutation) monitorCommit(mutation.committed, '保存任务')
@@ -148,11 +198,31 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
       const current = tasksRef.current.find((task) => task.id === taskId)
       if (!current || current.type !== 'single' || current.completed === completed) return false
       const mutation = demoMode ? null : setSingleCompletion(userId!, current, completed)
-      replaceTasks((tasks) =>
-        tasks.map((task) =>
-          task.id === taskId ? { ...task, completed, updatedAt: new Date() } : task,
-        ),
-      )
+      if (completed && current.recurrence && current.seriesState !== 'ended') {
+        const completedAt = new Date()
+        const next = nextOccurrence(current, completedAt)
+        lastAdvanceRef.current = { previous: { ...current }, expiresAt: Date.now() + 10_000 }
+        replaceTasks((tasks) => tasks.map((task) => task.id === taskId
+          ? next
+            ? {
+                ...task,
+                ...next,
+                count: 0,
+                completed: false,
+                seriesState: 'active',
+                currentOccurrenceKey: occurrenceKey(next.startDate),
+                occurrenceSequence: (task.occurrenceSequence ?? 1) + 1,
+                updatedAt: completedAt,
+              }
+            : { ...task, completed: true, seriesState: 'ended', updatedAt: completedAt }
+          : task))
+      } else {
+        replaceTasks((tasks) =>
+          tasks.map((task) =>
+            task.id === taskId ? { ...task, completed, ...(task.recurrence && !completed ? { seriesState: 'active' as const } : {}), updatedAt: new Date() } : task,
+          ),
+        )
+      }
       if (mutation) monitorCommit(mutation.committed, completed ? '完成任务' : '取消完成')
       return true
     },
@@ -167,16 +237,146 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
       const count = Math.max(0, Math.min(current.targetCount, current.count + delta))
       if (count === current.count) return false
       const mutation = demoMode ? null : adjustTaskProgress(userId!, current, delta)
-      replaceTasks((tasks) =>
-        tasks.map((task) =>
-          task.id === taskId ? { ...task, count, updatedAt: new Date() } : task,
-        ),
-      )
+      if (delta > 0 && count === current.targetCount && current.recurrence && current.seriesState !== 'ended') {
+        const completedAt = new Date()
+        const next = nextOccurrence(current, completedAt)
+        lastAdvanceRef.current = { previous: { ...current }, expiresAt: Date.now() + 10_000 }
+        replaceTasks((tasks) => tasks.map((task) => task.id === taskId
+          ? next
+            ? {
+                ...task,
+                ...next,
+                count: 0,
+                completed: false,
+                seriesState: 'active',
+                currentOccurrenceKey: occurrenceKey(next.startDate),
+                occurrenceSequence: (task.occurrenceSequence ?? 1) + 1,
+                updatedAt: completedAt,
+              }
+            : { ...task, count: task.targetCount, seriesState: 'ended', updatedAt: completedAt }
+          : task))
+      } else {
+        replaceTasks((tasks) =>
+          tasks.map((task) =>
+            task.id === taskId ? { ...task, count, updatedAt: new Date() } : task,
+          ),
+        )
+      }
       if (mutation) monitorCommit(mutation.committed, delta > 0 ? '推进任务' : '回退进度')
       return true
     },
     [demoMode, monitorCommit, replaceTasks, userId],
   )
+
+  const skipOccurrence = useCallback(async (taskId: string) => {
+    if (!demoMode && !userId) throw new Error('请先登录')
+    const current = tasksRef.current.find((task) => task.id === taskId)
+    if (!current?.recurrence || current.seriesState === 'ended') return false
+    const mutation = demoMode ? null : skipRecurringOccurrence(userId!, current)
+    const next = nextOccurrence(current, new Date())
+    lastAdvanceRef.current = { previous: { ...current }, expiresAt: Date.now() + 10_000 }
+    replaceTasks((tasks) => tasks.map((task) => task.id === taskId
+      ? next
+        ? {
+            ...task,
+            ...next,
+            count: 0,
+            completed: false,
+            currentOccurrenceKey: occurrenceKey(next.startDate),
+            occurrenceSequence: (task.occurrenceSequence ?? 1) + 1,
+            updatedAt: new Date(),
+          }
+        : { ...task, seriesState: 'ended', updatedAt: new Date() }
+      : task))
+    if (mutation) monitorCommit(mutation.committed, '跳过本次任务')
+    return true
+  }, [demoMode, monitorCommit, replaceTasks, userId])
+
+  const undoLastAdvance = useCallback(async () => {
+    const advance = lastAdvanceRef.current
+    if (!advance || advance.expiresAt < Date.now()) return false
+    const current = tasksRef.current.find((task) => task.id === advance.previous.id)
+    if (!current) return false
+    const untouched = current.title === advance.previous.title
+      && current.description === advance.previous.description
+      && current.type === advance.previous.type
+      && current.targetCount === advance.previous.targetCount
+      && JSON.stringify(current.tagIds ?? []) === JSON.stringify(advance.previous.tagIds ?? [])
+      && JSON.stringify(current.recurrence ?? null) === JSON.stringify(advance.previous.recurrence ?? null)
+      && (current.seriesState === 'ended' || current.currentOccurrenceKey !== advance.previous.currentOccurrenceKey)
+      && (current.seriesState === 'ended' || (current.type === 'single' ? !current.completed : current.count === 0))
+    if (!untouched) return false
+    const mutation = demoMode ? null : undoRecurringAdvance(userId!, current, advance.previous)
+    replaceTasks((tasks) => tasks.map((task) => task.id === advance.previous.id
+      ? { ...advance.previous, updatedAt: new Date() }
+      : task))
+    lastAdvanceRef.current = null
+    if (mutation) monitorCommit(mutation.committed, '撤销完成本次')
+    return true
+  }, [demoMode, monitorCommit, replaceTasks, userId])
+
+  const createTag = useCallback(async (name: string, color: TagColor = 'lavender') => {
+    if (!demoMode && !userId) throw new Error('请先登录')
+    const normalizedName = normalizeTagName(name)
+    const existing = tagsRef.current.find((tag) => tag.normalizedName === normalizedName)
+    if (existing) return existing
+    const tag = demoMode
+      ? {
+          id: `demo-tag-${crypto.randomUUID()}`,
+          name: cleanTagName(name),
+          normalizedName,
+          color,
+          sortOrder: Date.now(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+      : await createRemoteTag(userId!, name, color)
+    replaceTags((current) => [...current.filter((item) => item.id !== tag.id), tag])
+    return tag
+  }, [demoMode, replaceTags, userId])
+
+  const updateTag = useCallback(async (tagId: string, changes: { name?: string; color?: TagColor; sortOrder?: number }) => {
+    if (!demoMode && !userId) throw new Error('请先登录')
+    const current = tagsRef.current.find((tag) => tag.id === tagId)
+    if (!current) throw new Error('标签不存在')
+    const next = {
+      ...current,
+      ...changes,
+      ...(changes.name === undefined ? {} : { name: cleanTagName(changes.name), normalizedName: normalizeTagName(changes.name) }),
+      updatedAt: new Date(),
+    }
+    if (!demoMode) await updateRemoteTag(userId!, current, changes)
+    replaceTags((tags) => tags.map((tag) => tag.id === tagId ? next : tag))
+    return next
+  }, [demoMode, replaceTags, userId])
+
+  const deleteTag = useCallback(async (tagId: string) => {
+    if (!demoMode && !userId) throw new Error('请先登录')
+    const tag = tagsRef.current.find((item) => item.id === tagId)
+    if (!tag) return 0
+    const affected = demoMode
+      ? tasksRef.current.filter((task) => task.tagIds?.includes(tagId)).length
+      : await deleteRemoteTag(userId!, tag)
+    replaceTags((tags) => tags.filter((item) => item.id !== tagId))
+    replaceTasks((tasks) => tasks.map((task) => ({ ...task, tagIds: task.tagIds?.filter((id) => id !== tagId) ?? [] })))
+    return affected
+  }, [demoMode, replaceTags, replaceTasks, userId])
+
+  const mergeTags = useCallback(async (sourceId: string, targetId: string) => {
+    if (!demoMode && !userId) throw new Error('请先登录')
+    const source = tagsRef.current.find((tag) => tag.id === sourceId)
+    const target = tagsRef.current.find((tag) => tag.id === targetId)
+    if (!source || !target || source.id === target.id) return 0
+    const affected = demoMode
+      ? tasksRef.current.filter((task) => task.tagIds?.includes(sourceId)).length
+      : await mergeRemoteTags(userId!, source, target)
+    replaceTags((tags) => tags.filter((tag) => tag.id !== sourceId))
+    replaceTasks((tasks) => tasks.map((task) => ({
+      ...task,
+      tagIds: [...new Set((task.tagIds ?? []).map((id) => id === sourceId ? targetId : id))],
+    })))
+    return affected
+  }, [demoMode, replaceTags, replaceTasks, userId])
 
   const deleteTask = useCallback(
     async (taskId: string) => {
@@ -213,6 +413,7 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
   return useMemo(
     () => ({
       tasks,
+      tags,
       preferences,
       loading,
       dataReady,
@@ -224,19 +425,32 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
       changeType,
       setCompleted,
       adjustProgress,
+      skipOccurrence,
+      undoLastAdvance,
       deleteTask,
+      createTag,
+      updateTag,
+      deleteTag,
+      mergeTags,
       setPreferences: updatePreferences,
     }),
     [
       adjustProgress,
       changeType,
+      createTag,
       createTask,
+      deleteTag,
       deleteTask,
       dataReady,
       error,
       loading,
+      mergeTags,
       preferences,
       setCompleted,
+      skipOccurrence,
+      tags,
+      undoLastAdvance,
+      updateTag,
       updatePreferences,
       syncState,
       tasks,

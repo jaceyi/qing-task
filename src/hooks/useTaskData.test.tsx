@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SyncState, Task } from '../types'
+import { createRecurrenceRule, occurrenceKey } from '../lib/recurrence'
 import { useTaskData } from './useTaskData'
 
 const serviceState = vi.hoisted(() => ({
@@ -28,6 +29,10 @@ vi.mock('../lib/taskService', () => ({
       return vi.fn()
     },
   ),
+  subscribeTags: vi.fn((_userId: string, onData: (tags: []) => void) => {
+    onData([])
+    return vi.fn()
+  }),
   subscribeTaskLogs: vi.fn(() => vi.fn()),
   createTask: vi.fn(() => ({ result: 'created-task', committed: serviceState.commit })),
   updateTaskInfo: vi.fn(() => ({ result: true, committed: serviceState.commit })),
@@ -45,6 +50,8 @@ vi.mock('../lib/taskService', () => ({
     },
   ),
   deleteTask: vi.fn(() => ({ result: true, committed: serviceState.commit })),
+  undoRecurringAdvance: vi.fn(() => ({ result: true, committed: serviceState.commit })),
+  skipRecurringOccurrence: vi.fn(() => ({ result: true, committed: serviceState.commit })),
   savePreferences: vi.fn(() => serviceState.commit),
 }))
 
@@ -145,5 +152,33 @@ describe('本地优先任务状态', () => {
     await waitFor(() => expect(result.current.tasks[0].count).toBe(2))
     expect(result.current.error).toContain('未能同步')
     expect(result.current.syncState.pendingWrites).toBe(false)
+  })
+
+  it('完成重复任务后滚动到下一次，并可在短时间内撤销', async () => {
+    const recurringTask: Task = {
+      ...singleTask,
+      id: 'recurring-1',
+      startDate: '2026-08-03T09:00',
+      endDate: '2026-08-03T09:30',
+      recurrence: createRecurrenceRule('2026-08-03T09:00', '2026-08-03T09:30', 'daily'),
+      seriesState: 'active',
+      currentOccurrenceKey: occurrenceKey('2026-08-03T09:00'),
+      occurrenceSequence: 1,
+    }
+    const { result } = renderHook(() => useTaskData('user-1', false))
+    act(() => serviceState.onTasks?.([recurringTask], { fromCache: false, pendingWrites: false }))
+
+    await act(async () => {
+      expect(await result.current.setCompleted(recurringTask.id, true)).toBe(true)
+    })
+    expect(result.current.tasks[0].completed).toBe(false)
+    expect(result.current.tasks[0].startDate).not.toBe(recurringTask.startDate)
+    expect(result.current.tasks[0].occurrenceSequence).toBe(2)
+
+    await act(async () => {
+      expect(await result.current.undoLastAdvance()).toBe(true)
+    })
+    expect(result.current.tasks[0].startDate).toBe(recurringTask.startDate)
+    expect(result.current.tasks[0].occurrenceSequence).toBe(1)
   })
 })

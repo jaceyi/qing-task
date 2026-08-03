@@ -7,6 +7,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   Timestamp,
@@ -15,9 +16,14 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from './firebase'
+import { nextOccurrence, occurrenceKey } from './recurrence'
+import { cleanTagName, dedupeTagIds, normalizeTagName } from './tagLogic'
 import { normalizeTaskDraft, switchedTaskValues, updatedTaskInfo } from './taskLogic'
 import type {
+  RecurrenceRule,
   SyncState,
+  Tag,
+  TagColor,
   Task,
   TaskDraft,
   TaskInfoFields,
@@ -41,6 +47,7 @@ function toDate(value: unknown) {
 }
 
 function mapTask(id: string, data: DocumentData): Task {
+  const recurrence = mapRecurrence(data.recurrence)
   return {
     id,
     title: String(data.title ?? ''),
@@ -51,8 +58,52 @@ function mapTask(id: string, data: DocumentData): Task {
     targetCount: Number(data.targetCount ?? 0),
     count: Number(data.count ?? 0),
     completed: Boolean(data.completed),
+    schemaVersion: Number(data.schemaVersion ?? 1),
+    tagIds: Array.isArray(data.tagIds) ? dedupeTagIds(data.tagIds.map(String)) : [],
+    recurrence,
+    seriesState: recurrence ? (data.seriesState === 'ended' ? 'ended' : 'active') : null,
+    currentOccurrenceKey: recurrence
+      ? String(data.currentOccurrenceKey ?? occurrenceKey(String(data.startDate ?? '')))
+      : null,
+    occurrenceSequence: recurrence ? Math.max(1, Number(data.occurrenceSequence ?? 1)) : 0,
+    lastAdvanceMutationId: typeof data.lastAdvanceMutationId === 'string' ? data.lastAdvanceMutationId : null,
     createdAt: toDate(data.createdAt),
     updatedAt: toDate(data.updatedAt),
+  }
+}
+
+function mapRecurrence(value: unknown): RecurrenceRule | null {
+  if (!value || typeof value !== 'object') return null
+  const data = value as Record<string, unknown>
+  if (!['hourly', 'daily', 'weekly', 'monthly', 'yearly'].includes(String(data.frequency))) return null
+  const endData = data.end && typeof data.end === 'object' ? data.end as Record<string, unknown> : null
+  const end: RecurrenceRule['end'] = endData?.kind === 'until' && typeof endData.date === 'string'
+    ? { kind: 'until', date: endData.date }
+    : { kind: 'never' }
+  return {
+    frequency: data.frequency as RecurrenceRule['frequency'],
+    interval: Math.max(1, Math.min(999, Number(data.interval ?? 1))),
+    ...(Array.isArray(data.byWeekdays)
+      ? { byWeekdays: data.byWeekdays.filter((day): day is 1 | 2 | 3 | 4 | 5 | 6 | 7 => Number.isInteger(day) && day >= 1 && day <= 7) }
+      : {}),
+    ...(Number.isInteger(data.byMonthDay) ? { byMonthDay: Number(data.byMonthDay) } : {}),
+    end,
+    timeZone: String(data.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
+    anchorStart: String(data.anchorStart ?? ''),
+    durationMinutes: Math.max(1, Number(data.durationMinutes ?? 1)),
+  }
+}
+
+function mapTag(id: string, data: DocumentData): Tag {
+  return {
+    id,
+    name: String(data.name ?? ''),
+    normalizedName: String(data.normalizedName ?? ''),
+    color: data.color as TagColor,
+    sortOrder: Number(data.sortOrder ?? 0),
+    createdAt: toDate(data.createdAt),
+    updatedAt: toDate(data.updatedAt),
+    deletedAt: toDate(data.deletedAt),
   }
 }
 
@@ -62,6 +113,18 @@ function taskRef(userId: string, taskId: string) {
 
 function newLogRef(userId: string, taskId: string) {
   return doc(collection(db, 'users', userId, 'tasks', taskId, 'logs'))
+}
+
+function occurrenceRef(userId: string, taskId: string, key: string) {
+  return doc(db, 'users', userId, 'tasks', taskId, 'occurrences', key)
+}
+
+function tagRef(userId: string, tagId: string) {
+  return doc(db, 'users', userId, 'tags', tagId)
+}
+
+function tagClaimRef(userId: string, normalizedName: string) {
+  return doc(db, 'users', userId, 'tagNameClaims', encodeURIComponent(normalizedName))
 }
 
 function logData(type: TaskLogType, action: string, payload: Record<string, unknown>) {
@@ -96,6 +159,19 @@ export function subscribeTasks(
   )
 }
 
+export function subscribeTags(
+  userId: string,
+  onData: (tags: Tag[]) => void,
+  onError: (error: Error) => void,
+) {
+  const tagsQuery = query(collection(db, 'users', userId, 'tags'), orderBy('sortOrder', 'asc'))
+  return onSnapshot(
+    tagsQuery,
+    (snapshot) => onData(snapshot.docs.map((item) => mapTag(item.id, item.data({ serverTimestamps: 'estimate' })))),
+    (error) => onError(error),
+  )
+}
+
 export function createTask(
   userId: string,
   draft: TaskDraft,
@@ -106,6 +182,13 @@ export function createTask(
   const batch = writeBatch(db)
   batch.set(reference, {
     ...normalized,
+    schemaVersion: 2,
+    tagIds: dedupeTagIds(normalized.tagIds),
+    recurrence: normalized.recurrence ?? null,
+    seriesState: normalized.recurrence ? 'active' : null,
+    currentOccurrenceKey: normalized.recurrence ? occurrenceKey(normalized.startDate) : null,
+    occurrenceSequence: normalized.recurrence ? 1 : 0,
+    lastAdvanceMutationId: null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   })
@@ -149,6 +232,27 @@ export function updateTaskInfo(
       changes.push({ action: '修改结束时间', before: current.endDate, after: next.endDate })
     }
   }
+  if (JSON.stringify(current.recurrence ?? null) !== JSON.stringify(next.recurrence ?? null)) {
+    patch.recurrence = next.recurrence ?? null
+    patch.seriesState = next.recurrence ? 'active' : null
+    patch.currentOccurrenceKey = next.recurrence ? occurrenceKey(next.startDate) : null
+    patch.occurrenceSequence = next.recurrence ? Math.max(1, current.occurrenceSequence ?? 1) : 0
+    changes.push({
+      action: next.recurrence ? (current.recurrence ? '修改重复计划' : '开启重复') : '关闭重复',
+      before: current.recurrence ? '重复' : '不重复',
+      after: next.recurrence ? '重复' : '不重复',
+    })
+  }
+  const currentTagIds = dedupeTagIds(current.tagIds)
+  const nextTagIds = dedupeTagIds(next.tagIds)
+  if (JSON.stringify(currentTagIds) !== JSON.stringify(nextTagIds)) {
+    patch.tagIds = nextTagIds
+    changes.push({
+      action: '修改任务标签',
+      before: currentTagIds.length,
+      after: nextTagIds.length,
+    })
+  }
   if (current.type === 'progress' && current.targetCount !== next.targetCount) {
     patch.targetCount = next.targetCount
     changes.push({
@@ -173,7 +277,7 @@ export function updateTaskInfo(
   changes.forEach((change) => {
     batch.set(
       newLogRef(userId, current.id),
-      logData('update', change.action, { before: change.before, after: change.after }),
+      logData(change.action.includes('标签') ? 'tag' : change.action.includes('重复') ? 'recurrence' : 'update', change.action, { before: change.before, after: change.after }),
     )
   })
   return { result: true, committed: batch.commit() }
@@ -206,8 +310,15 @@ export function setSingleCompletion(
   completed: boolean,
 ): QueuedMutation<boolean> {
   if (current.type !== 'single' || current.completed === completed) return unchanged(false)
+  if (completed && current.recurrence && current.seriesState !== 'ended') {
+    return advanceRecurringTask(userId, current, 'completed')
+  }
   const batch = writeBatch(db)
-  batch.update(taskRef(userId, current.id), { completed, updatedAt: serverTimestamp() })
+  batch.update(taskRef(userId, current.id), {
+    completed,
+    ...(current.recurrence && !completed ? { seriesState: 'active' } : {}),
+    updatedAt: serverTimestamp(),
+  })
   batch.set(
     newLogRef(userId, current.id),
     logData('progress', completed ? '完成任务' : '取消完成', {
@@ -226,6 +337,9 @@ export function adjustTaskProgress(
   if (current.type !== 'progress') return unchanged(false)
   const nextCount = Math.max(0, Math.min(current.targetCount, current.count + delta))
   if (nextCount === current.count) return unchanged(false)
+  if (delta > 0 && nextCount === current.targetCount && current.recurrence && current.seriesState !== 'ended') {
+    return advanceRecurringTask(userId, current, 'completed')
+  }
 
   const batch = writeBatch(db)
   batch.update(taskRef(userId, current.id), {
@@ -243,13 +357,225 @@ export function adjustTaskProgress(
   return { result: true, committed: batch.commit() }
 }
 
+export function advanceRecurringTask(
+  userId: string,
+  current: Task,
+  result: 'completed' | 'skipped',
+  completedAt = new Date(),
+): QueuedMutation<boolean> {
+  if (!current.recurrence || current.seriesState === 'ended') return unchanged(false)
+  const next = nextOccurrence(current, completedAt)
+  const mutationId = crypto.randomUUID()
+  const key = current.currentOccurrenceKey || occurrenceKey(current.startDate)
+  const batch = writeBatch(db)
+  batch.set(
+    occurrenceRef(userId, current.id, key),
+    {
+      occurrenceKey: key,
+      result,
+      scheduledStart: current.startDate,
+      scheduledEnd: current.endDate,
+      count: result === 'completed' && current.type === 'progress' ? current.targetCount : current.count,
+      targetCount: current.targetCount,
+      title: current.title,
+      tagIds: dedupeTagIds(current.tagIds),
+      completedAt: completedAt.toISOString(),
+      mutationId,
+      createdAt: serverTimestamp(),
+    },
+  )
+  batch.set(
+    newLogRef(userId, current.id),
+    logData('recurrence', result === 'completed' ? '完成本次重复任务' : '跳过本次重复任务', {
+      occurrenceKey: key,
+      result,
+      scheduledStart: current.startDate,
+      scheduledEnd: current.endDate,
+      count: result === 'completed' && current.type === 'progress' ? current.targetCount : current.count,
+      targetCount: current.targetCount,
+      completedAt: completedAt.toISOString(),
+    }),
+  )
+  if (next) {
+    batch.update(taskRef(userId, current.id), {
+      startDate: next.startDate,
+      endDate: next.endDate,
+      count: 0,
+      completed: false,
+      seriesState: 'active',
+      currentOccurrenceKey: occurrenceKey(next.startDate),
+      occurrenceSequence: (current.occurrenceSequence ?? 1) + 1,
+      lastAdvanceMutationId: mutationId,
+      updatedAt: serverTimestamp(),
+    })
+  } else {
+    batch.update(taskRef(userId, current.id), {
+      count: current.type === 'progress' && result === 'completed' ? current.targetCount : current.count,
+      completed: current.type === 'single' && result === 'completed',
+      seriesState: 'ended',
+      lastAdvanceMutationId: mutationId,
+      updatedAt: serverTimestamp(),
+    })
+  }
+  return { result: true, committed: batch.commit() }
+}
+
+export function undoRecurringAdvance(
+  userId: string,
+  current: Task,
+  previous: Task,
+): QueuedMutation<boolean> {
+  if (!previous.recurrence || current.id !== previous.id) return unchanged(false)
+  const mutationId = crypto.randomUUID()
+  const batch = writeBatch(db)
+  batch.delete(occurrenceRef(
+    userId,
+    current.id,
+    previous.currentOccurrenceKey ?? occurrenceKey(previous.startDate),
+  ))
+  batch.update(taskRef(userId, current.id), {
+    startDate: previous.startDate,
+    endDate: previous.endDate,
+    count: previous.count,
+    completed: previous.completed,
+    recurrence: previous.recurrence,
+    seriesState: 'active',
+    currentOccurrenceKey: previous.currentOccurrenceKey ?? occurrenceKey(previous.startDate),
+    occurrenceSequence: previous.occurrenceSequence ?? 1,
+    lastAdvanceMutationId: mutationId,
+    updatedAt: serverTimestamp(),
+  })
+  batch.set(
+    newLogRef(userId, current.id),
+    logData('recurrence', '撤销完成本次', {
+      restoredOccurrenceKey: previous.currentOccurrenceKey ?? occurrenceKey(previous.startDate),
+      mutationId,
+    }),
+  )
+  return { result: true, committed: batch.commit() }
+}
+
+export function skipRecurringOccurrence(userId: string, current: Task) {
+  return advanceRecurringTask(userId, current, 'skipped')
+}
+
+export async function createTag(
+  userId: string,
+  name: string,
+  color: TagColor = 'lavender',
+): Promise<Tag> {
+  const cleanName = cleanTagName(name)
+  const normalizedName = normalizeTagName(cleanName)
+  if (!normalizedName) throw new Error('请输入标签名称')
+  const reference = doc(collection(db, 'users', userId, 'tags'))
+  const claim = tagClaimRef(userId, normalizedName)
+  const now = new Date()
+  const existingId = await runTransaction(db, async (transaction) => {
+    const existingClaim = await transaction.get(claim)
+    if (existingClaim.exists()) return String(existingClaim.data().tagId)
+    transaction.set(reference, {
+      name: cleanName,
+      normalizedName,
+      color,
+      sortOrder: Date.now(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    transaction.set(claim, { tagId: reference.id, normalizedName, createdAt: serverTimestamp() })
+    return reference.id
+  })
+  if (existingId !== reference.id) {
+    const existing = await runTransaction(db, async (transaction) => transaction.get(tagRef(userId, existingId)))
+    if (existing.exists()) return mapTag(existing.id, existing.data())
+  }
+  return {
+    id: reference.id,
+    name: cleanName,
+    normalizedName,
+    color,
+    sortOrder: Date.now(),
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export async function updateTag(
+  userId: string,
+  current: Tag,
+  changes: { name?: string; color?: TagColor; sortOrder?: number },
+) {
+  const name = changes.name === undefined ? current.name : cleanTagName(changes.name)
+  const normalizedName = normalizeTagName(name)
+  if (!normalizedName) throw new Error('请输入标签名称')
+  await runTransaction(db, async (transaction) => {
+    if (normalizedName !== current.normalizedName) {
+      const nextClaim = tagClaimRef(userId, normalizedName)
+      const existing = await transaction.get(nextClaim)
+      if (existing.exists() && existing.data().tagId !== current.id) throw new Error('已有同名标签，请选择合并')
+      transaction.delete(tagClaimRef(userId, current.normalizedName))
+      transaction.set(nextClaim, { tagId: current.id, normalizedName, createdAt: serverTimestamp() })
+    }
+    transaction.update(tagRef(userId, current.id), {
+      name,
+      normalizedName,
+      color: changes.color ?? current.color,
+      sortOrder: changes.sortOrder ?? current.sortOrder,
+      updatedAt: serverTimestamp(),
+    })
+  })
+}
+
+async function updateTasksForTag(
+  userId: string,
+  sourceTagId: string,
+  replacementTagId?: string,
+) {
+  const snapshot = await getDocs(collection(db, 'users', userId, 'tasks'))
+  const affected = snapshot.docs.filter((task) => Array.isArray(task.data().tagIds) && task.data().tagIds.includes(sourceTagId))
+  for (let offset = 0; offset < affected.length; offset += 400) {
+    const batch = writeBatch(db)
+    affected.slice(offset, offset + 400).forEach((task) => {
+      const next = dedupeTagIds([
+        ...task.data().tagIds.filter((tagId: string) => tagId !== sourceTagId),
+        ...(replacementTagId ? [replacementTagId] : []),
+      ])
+      batch.update(task.ref, { tagIds: next, updatedAt: serverTimestamp() })
+    })
+    await batch.commit()
+  }
+  return affected.length
+}
+
+export async function mergeTags(userId: string, source: Tag, target: Tag) {
+  if (source.id === target.id) return 0
+  const affected = await updateTasksForTag(userId, source.id, target.id)
+  const batch = writeBatch(db)
+  batch.delete(tagRef(userId, source.id))
+  batch.delete(tagClaimRef(userId, source.normalizedName))
+  await batch.commit()
+  return affected
+}
+
+export async function deleteTag(userId: string, tag: Tag) {
+  const affected = await updateTasksForTag(userId, tag.id)
+  const batch = writeBatch(db)
+  batch.delete(tagRef(userId, tag.id))
+  batch.delete(tagClaimRef(userId, tag.normalizedName))
+  await batch.commit()
+  return affected
+}
+
 export function deleteTask(userId: string, taskId: string): QueuedMutation<boolean> {
   const reference = taskRef(userId, taskId)
   const committed = deleteDoc(reference).then(async () => {
-    const logs = await getDocs(collection(reference, 'logs'))
-    if (logs.empty) return
+    const [logs, occurrences] = await Promise.all([
+      getDocs(collection(reference, 'logs')),
+      getDocs(collection(reference, 'occurrences')),
+    ])
+    if (logs.empty && occurrences.empty) return
     const batch = writeBatch(db)
     logs.docs.forEach((entry) => batch.delete(entry.ref))
+    occurrences.docs.forEach((entry) => batch.delete(entry.ref))
     await batch.commit()
   })
   return { result: true, committed }
@@ -270,7 +596,7 @@ export function subscribeTaskLogs(
           const data = entry.data({ serverTimestamps: 'estimate' })
           return {
             id: entry.id,
-            type: data.type === 'progress' ? 'progress' : 'update',
+            type: ['progress', 'recurrence', 'tag'].includes(data.type) ? data.type : 'update',
             action: String(data.action ?? ''),
             payload: (data.payload ?? {}) as Record<string, unknown>,
             createdAt: toDate(data.createdAt),

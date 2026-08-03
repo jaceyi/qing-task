@@ -9,7 +9,9 @@ service cloud.firestore {
     function validTask(data) {
       return data.keys().hasOnly([
           'title', 'description', 'startDate', 'endDate', 'type', 'targetCount', 'count',
-          'completed', 'createdAt', 'updatedAt'
+          'completed', 'schemaVersion', 'tagIds', 'recurrence', 'seriesState',
+          'currentOccurrenceKey', 'occurrenceSequence', 'lastAdvanceMutationId',
+          'createdAt', 'updatedAt'
         ])
         && data.keys().hasAll([
           'title', 'startDate', 'endDate', 'type', 'targetCount', 'count',
@@ -32,6 +34,13 @@ service cloud.firestore {
         && data.targetCount is int
         && data.count is int
         && data.completed is bool
+        && (!('schemaVersion' in data) || (data.schemaVersion is int && data.schemaVersion in [1, 2]))
+        && (!('tagIds' in data) || (data.tagIds is list && data.tagIds.size() <= 10))
+        && (!('recurrence' in data) || validRecurrence(data.recurrence, data.startDate, data.endDate))
+        && (!('seriesState' in data) || data.seriesState == null || data.seriesState in ['active', 'ended'])
+        && (!('currentOccurrenceKey' in data) || data.currentOccurrenceKey == null || data.currentOccurrenceKey is string)
+        && (!('occurrenceSequence' in data) || (data.occurrenceSequence is int && data.occurrenceSequence >= 0))
+        && (!('lastAdvanceMutationId' in data) || data.lastAdvanceMutationId == null || data.lastAdvanceMutationId is string)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && (
@@ -48,15 +57,77 @@ service cloud.firestore {
         );
     }
 
+    function validRecurrence(recurrence, startDate, endDate) {
+      return recurrence == null
+        || (
+          recurrence is map
+          && startDate.size() >= 10
+          && endDate.size() >= 10
+          && recurrence.keys().hasOnly([
+            'frequency', 'interval', 'byWeekdays', 'byMonthDay', 'end',
+            'timeZone', 'anchorStart', 'durationMinutes'
+          ])
+          && recurrence.keys().hasAll([
+            'frequency', 'interval', 'end', 'timeZone', 'anchorStart', 'durationMinutes'
+          ])
+          && recurrence.frequency in ['hourly', 'daily', 'weekly', 'monthly', 'yearly']
+          && recurrence.interval is int
+          && recurrence.interval >= 1
+          && recurrence.interval <= 999
+          && (!('byWeekdays' in recurrence)
+            || (recurrence.byWeekdays is list
+              && recurrence.byWeekdays.size() >= 1
+              && recurrence.byWeekdays.size() <= 7))
+          && (!('byMonthDay' in recurrence)
+            || (recurrence.byMonthDay is int
+              && recurrence.byMonthDay >= 1
+              && recurrence.byMonthDay <= 31))
+          && recurrence.end is map
+          && recurrence.end.keys().hasOnly(['kind', 'date'])
+          && recurrence.end.kind in ['never', 'until']
+          && (recurrence.end.kind == 'never'
+            || ('date' in recurrence.end
+              && recurrence.end.date is string
+              && recurrence.end.date.size() == 10))
+          && recurrence.timeZone is string
+          && recurrence.timeZone.size() > 0
+          && recurrence.timeZone.size() <= 80
+          && recurrence.anchorStart is string
+          && recurrence.anchorStart.size() >= 10
+          && recurrence.durationMinutes is int
+          && recurrence.durationMinutes >= 1
+        );
+    }
+
     function validLog(data) {
       return data.keys().hasOnly(['type', 'action', 'payload', 'createdAt'])
         && data.keys().hasAll(['type', 'action', 'payload', 'createdAt'])
-        && data.type in ['update', 'progress']
+        && data.type in ['update', 'progress', 'recurrence', 'tag']
         && data.action is string
         && data.action.size() > 0
         && data.action.size() <= 120
         && data.payload is map
         && data.createdAt is timestamp;
+    }
+
+    function validTag(data) {
+      return data.keys().hasOnly([
+          'name', 'normalizedName', 'color', 'sortOrder', 'createdAt', 'updatedAt', 'deletedAt'
+        ])
+        && data.keys().hasAll([
+          'name', 'normalizedName', 'color', 'sortOrder', 'createdAt', 'updatedAt'
+        ])
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 24
+        && data.normalizedName is string
+        && data.normalizedName.size() > 0
+        && data.normalizedName.size() <= 72
+        && data.color in ['lavender', 'mint', 'apricot', 'rose', 'sky', 'amber', 'slate', 'indigo']
+        && data.sortOrder is int
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('deletedAt' in data) || data.deletedAt is timestamp);
     }
 
     match /users/{userId}/tasks/{taskId} {
@@ -66,6 +137,27 @@ service cloud.firestore {
       match /logs/{logId} {
         allow read, delete: if isOwner(userId);
         allow create: if isOwner(userId) && validLog(request.resource.data);
+        allow update: if false;
+      }
+
+      match /occurrences/{occurrenceId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasOnly([
+            'occurrenceKey', 'result', 'scheduledStart', 'scheduledEnd', 'count',
+            'targetCount', 'title', 'tagIds', 'completedAt', 'mutationId', 'createdAt'
+          ])
+          && request.resource.data.occurrenceKey is string
+          && request.resource.data.result in ['completed', 'skipped']
+          && request.resource.data.scheduledStart is string
+          && request.resource.data.scheduledEnd is string
+          && request.resource.data.count is int
+          && request.resource.data.targetCount is int
+          && request.resource.data.title is string
+          && request.resource.data.tagIds is list
+          && request.resource.data.completedAt is string
+          && request.resource.data.mutationId is string
+          && request.resource.data.createdAt is timestamp;
         allow update: if false;
       }
     }
@@ -78,6 +170,21 @@ service cloud.firestore {
         && request.resource.data.hideCompleted is bool
         && request.resource.data.updatedAt is timestamp;
       allow delete: if false;
+    }
+
+    match /users/{userId}/tags/{tagId} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && validTag(request.resource.data);
+    }
+
+    match /users/{userId}/tagNameClaims/{nameKey} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && request.resource.data.keys().hasOnly(['tagId', 'normalizedName', 'createdAt'])
+        && request.resource.data.keys().hasAll(['tagId', 'normalizedName', 'createdAt'])
+        && request.resource.data.tagId is string
+        && request.resource.data.normalizedName is string
+        && request.resource.data.createdAt is timestamp;
     }
   }
 }

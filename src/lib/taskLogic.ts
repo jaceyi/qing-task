@@ -1,5 +1,7 @@
 import { taskOverlapsScope } from './date'
-import type { BoardScope, Task, TaskDraft, TaskInfoFields, TaskType } from '../types'
+import { syncRecurrenceTiming } from './recurrence'
+import { dedupeTagIds, taskMatchesTags } from './tagLogic'
+import type { CustomDateRange, Tag, TagMatchMode, Task, TaskDraft, TaskInfoFields, TaskType, TimeFilterScope } from '../types'
 
 export function isTaskComplete(task: Pick<Task, 'type' | 'completed' | 'count' | 'targetCount'>) {
   return task.type === 'single' ? task.completed : task.count === task.targetCount
@@ -7,19 +9,28 @@ export function isTaskComplete(task: Pick<Task, 'type' | 'completed' | 'count' |
 
 export function filterAndSortTasks(
   tasks: Task[],
-  scope: BoardScope,
+  scope: TimeFilterScope,
   hideCompleted: boolean,
   searchTerm = '',
   reference = new Date(),
+  options: {
+    tags?: Tag[]
+    selectedTagIds?: string[]
+    matchMode?: TagMatchMode
+    customRange?: CustomDateRange
+  } = {},
 ) {
   const normalizedSearch = searchTerm.trim().toLocaleLowerCase('zh-CN')
+  const tagNames = new Map((options.tags ?? []).map((tag) => [tag.id, tag.name.toLocaleLowerCase('zh-CN')]))
   return tasks
-    .filter((task) => taskOverlapsScope(task, scope, reference))
+    .filter((task) => taskOverlapsScope(task, scope, reference, options.customRange))
+    .filter((task) => taskMatchesTags(task.tagIds, options.selectedTagIds ?? [], options.matchMode ?? 'all'))
     .filter(
       (task) =>
         !normalizedSearch ||
         task.title.toLocaleLowerCase('zh-CN').includes(normalizedSearch) ||
-        task.description.toLocaleLowerCase('zh-CN').includes(normalizedSearch),
+        task.description.toLocaleLowerCase('zh-CN').includes(normalizedSearch) ||
+        (task.tagIds ?? []).some((tagId) => tagNames.get(tagId)?.includes(normalizedSearch)),
     )
     .filter((task) => !hideCompleted || !isTaskComplete(task))
     .sort((a, b) => {
@@ -32,11 +43,15 @@ export function filterAndSortTasks(
 export function normalizeTaskDraft(draft: TaskDraft): TaskDraft {
   const title = draft.title.trim().slice(0, 120)
   const description = draft.description.trim().slice(0, 2000)
+  const tagIds = dedupeTagIds(draft.tagIds)
+  const recurrence = syncRecurrenceTiming(draft.recurrence, draft.startDate, draft.endDate)
   if (draft.type === 'single') {
     return {
       ...draft,
       title,
       description,
+      tagIds,
+      recurrence,
       count: 0,
       targetCount: 0,
     }
@@ -47,6 +62,8 @@ export function normalizeTaskDraft(draft: TaskDraft): TaskDraft {
     ...draft,
     title,
     description,
+    tagIds,
+    recurrence,
     targetCount,
     count: Math.min(targetCount, Math.max(0, Math.round(draft.count || 0))),
     completed: false,
@@ -59,13 +76,32 @@ export function updatedTaskInfo(task: Task, fields: TaskInfoFields) {
       ? Math.min(99_999, Math.max(1, Math.round(fields.targetCount || 1)))
       : 0
 
-  return {
+  const next = {
     title: fields.title.trim().slice(0, 120),
     description: fields.description.trim().slice(0, 2000),
     startDate: fields.startDate,
     endDate: fields.endDate,
     targetCount,
     count: task.type === 'progress' ? Math.min(task.count, targetCount) : 0,
+  }
+  return {
+    ...next,
+    ...(fields.tagIds !== undefined || task.tagIds !== undefined
+      ? { tagIds: dedupeTagIds(fields.tagIds ?? task.tagIds) }
+      : {}),
+    ...(fields.recurrence !== undefined || task.recurrence !== undefined
+      ? {
+          recurrence:
+            task.startDate !== fields.startDate
+            || task.endDate !== fields.endDate
+            || JSON.stringify(task.recurrence ?? null) !== JSON.stringify(fields.recurrence ?? null)
+              ? fields.recurrenceTimingScope === 'current'
+                && JSON.stringify(task.recurrence ?? null) === JSON.stringify(fields.recurrence ?? null)
+                  ? task.recurrence ?? null
+                  : syncRecurrenceTiming(fields.recurrence, fields.startDate, fields.endDate)
+              : task.recurrence ?? null,
+        }
+      : {}),
   }
 }
 

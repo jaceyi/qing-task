@@ -6,6 +6,10 @@
 
 - Google 账号登录，数据按用户隔离存储在 Firebase Firestore
 - 完成型任务与进度型任务，可随时切换类型
+- 普通任务和进度任务都可设置日/周/月/年重复；完成当前实例后自动安排下一次，并支持 10 秒撤销
+- 重复规则支持常用预设、自定间隔、多星期、截止日期和未来三次预览
+- 每个任务可添加多个标签，支持标签看板、全部/任一组合筛选、标签搜索与行内展示
+- 设置页支持标签创建、重命名、改色、排序、合并和删除
 - 桌面端悬停快捷操作，移动端左右滑动完成或调整进度
 - 新建、编辑、复制、删除、完成/取消完成、进度增减，支持多行任务描述
 - 可选的任务起止时间，填写时精确到分钟；无时间任务会集中显示在“全部”看板
@@ -61,6 +65,9 @@ GitHub Actions 会先执行类型检查、代码检查、测试和构建；只�
 ```text
 users/{uid}/tasks/{taskId}
 users/{uid}/tasks/{taskId}/logs/{logId}
+users/{uid}/tasks/{taskId}/occurrences/{occurrenceKey}
+users/{uid}/tags/{tagId}
+users/{uid}/tagNameClaims/{normalizedName}
 users/{uid}/settings/preferences
 ```
 

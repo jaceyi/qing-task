@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
-import { CalendarOff, Check, Minus, Plus, X } from 'lucide-react'
+import { CalendarOff, Check, Minus, Plus, Repeat2, X } from 'lucide-react'
 import { formatDateRange } from '../lib/date'
+import { describeRecurrence } from '../lib/recurrence'
 import { isTaskComplete } from '../lib/taskLogic'
-import type { Task } from '../types'
+import type { Tag, Task } from '../types'
 
 type SwipeDirection = 'positive' | 'negative'
 
@@ -11,9 +12,11 @@ interface TaskRowProps {
   onOpen: () => void
   onAction: (direction: SwipeDirection) => Promise<boolean>
   onNotify: (message: string) => void
+  onRecurrenceAdvanced?: (message: string) => void
+  tags?: Tag[]
 }
 
-export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
+export function TaskRow({ task, onOpen, onAction, onNotify, onRecurrenceAdvanced, tags = [] }: TaskRowProps) {
   const [offset, setOffset] = useState(0)
   const [acting, setActing] = useState(false)
   const rowRef = useRef<HTMLDivElement>(null)
@@ -31,6 +34,7 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
   const positiveDisabled = task.type === 'single' ? task.completed : task.count >= task.targetCount
   const negativeDisabled = task.type === 'single' ? !task.completed : task.count <= 0
   const progress = task.type === 'progress' ? Math.round((task.count / task.targetCount) * 100) : 0
+  const rowTags = tags.filter((tag) => task.tagIds?.includes(tag.id))
 
   useEffect(() => {
     const row = rowRef.current
@@ -75,6 +79,20 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
     try {
       const changed = await onAction(direction)
       if (changed) {
+        const advancesRecurrence = Boolean(
+          task.recurrence
+          && task.seriesState !== 'ended'
+          && direction === 'positive'
+          && (task.type === 'single' || task.count + 1 === task.targetCount),
+        )
+        if (advancesRecurrence) {
+          onRecurrenceAdvanced?.(
+            task.type === 'progress'
+              ? `本次 ${task.targetCount}/${task.targetCount} 已完成，下一次已从 0/${task.targetCount} 开始`
+              : '已完成本次，下一次已安排',
+          )
+          return
+        }
         const message =
           task.type === 'single'
             ? direction === 'positive'
@@ -224,12 +242,12 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
             }}
           >
             <svg viewBox="0 0 26 26" aria-hidden="true">
-              <circle className="task-progress-ring-track" cx="13" cy="13" r="10" pathLength="100" />
+              <circle className="task-progress-ring-track" cx="13" cy="13" r="12" pathLength="100" />
               <circle
                 className="task-progress-ring-value"
                 cx="13"
                 cy="13"
-                r="10"
+                r="12"
                 pathLength="100"
                 strokeDasharray="100"
                 strokeDashoffset={100 - progress}
@@ -250,9 +268,16 @@ export function TaskRow({ task, onOpen, onAction, onNotify }: TaskRowProps) {
             }}
           >
             <span className="task-title">{task.title}</span>
-            <span className={`task-date ${!task.startDate && !task.endDate ? 'is-timeless' : ''}`}>
-              {!task.startDate && !task.endDate && <CalendarOff />}
-              {formatDateRange(task.startDate, task.endDate)}
+            <span className="task-meta-line">
+              <span className={`task-date ${!task.startDate && !task.endDate ? 'is-timeless' : ''}`}>
+                {!task.startDate && !task.endDate && <CalendarOff />}
+                {formatDateRange(task.startDate, task.endDate)}
+              </span>
+              {task.recurrence && (
+                <span className="recurrence-badge" title={describeRecurrence(task.recurrence)}><Repeat2 />{describeRecurrence(task.recurrence).split(' · ')[0]}</span>
+              )}
+              {rowTags.slice(0, 3).map((tag) => <span key={tag.id} className={`task-tag-dot is-${tag.color}`} title={tag.name}><i />{tag.name}</span>)}
+              {rowTags.length > 3 && <span className="task-tag-more">+{rowTags.length - 3}</span>}
             </span>
           </button>
         </span>

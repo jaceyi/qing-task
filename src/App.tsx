@@ -37,7 +37,7 @@ import { SettingsView } from './components/SettingsView'
 import { TaskBoard } from './components/TaskBoard'
 import { TaskDetail } from './components/TaskDetail'
 import { TaskFormPanel } from './components/TaskFormPanel'
-import type { BoardScope, Task, TaskDraft, TaskType } from './types'
+import type { BoardScope, CustomDateRange, TagMatchMode, Task, TaskDraft, TaskType, TimeFilterScope } from './types'
 import './App.css'
 
 const scopeLabels: Record<BoardScope, string> = {
@@ -72,7 +72,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('')
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
-  const [toast, setToast] = useState('')
+  const [toast, setToast] = useState<{ message: string; actionLabel?: string; onAction?: () => void } | null>(null)
   const [online, setOnline] = useState(navigator.onLine)
   const [formDirty, setFormDirty] = useState(false)
   const [detailDirty, setDetailDirty] = useState(false)
@@ -89,7 +89,13 @@ function App() {
     [selectedTaskId, taskData.tasks],
   )
   const { logs, error: logsError } = useTaskLogs(userId, selectedTask, demoMode)
-  const boardScope: BoardScope = route.name === 'board' ? route.scope : fromScope
+  const timeScope: TimeFilterScope = route.name === 'board' || route.name === 'tag-board' ? route.scope : fromScope
+  const boardScope: BoardScope = timeScope === 'custom' ? fromScope : timeScope
+  const selectedTagIds = route.name === 'tag-board' || route.name === 'board' ? route.tagIds ?? [] : []
+  const tagMatchMode: TagMatchMode = route.name === 'tag-board' || route.name === 'board' ? route.matchMode ?? 'all' : 'all'
+  const customRange: CustomDateRange | undefined = route.name === 'tag-board' && route.scope === 'custom'
+    ? { startDate: route.customStart ?? '', endDate: route.customEnd ?? '' }
+    : undefined
   const settingsOpen = route.name === 'settings'
   const showingDetail = route.name === 'task-detail'
   const formSource: Task | null | undefined =
@@ -138,7 +144,7 @@ function App() {
   }, [route])
 
   useEffect(() => {
-    if (route.name !== 'board') setMobileSearchOpen(false)
+    if (route.name !== 'board' && route.name !== 'tag-board') setMobileSearchOpen(false)
     else if (searchTerm.trim()) setMobileSearchOpen(true)
   }, [route.name, searchTerm])
 
@@ -192,16 +198,75 @@ function App() {
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
 
-  const notify = (message: string) => {
-    setToast(message)
+  const notify = (message: string, options: { actionLabel?: string; onAction?: () => void; duration?: number } = {}) => {
+    setToast({ message, actionLabel: options.actionLabel, onAction: options.onAction })
     window.clearTimeout(toastTimer.current)
-    toastTimer.current = window.setTimeout(() => setToast(''), 2600)
+    toastTimer.current = window.setTimeout(() => setToast(null), options.duration ?? (options.actionLabel ? 10_000 : 2600))
   }
 
-  const navigateToBoard = (scope: BoardScope) => {
-    navigateTopLevel({ name: 'board', scope }, { fromScope: scope })
+  const notifyRecurrenceAdvanced = (message: string) => {
+    notify(message, {
+      actionLabel: '撤销',
+      duration: 10_000,
+      onAction: () => {
+        void taskData.undoLastAdvance().then((restored) => notify(restored ? '已恢复上一次任务' : '撤销时间已过'))
+      },
+    })
+  }
+
+  const navigateToBoard = (
+    scope: BoardScope,
+    tagIds: string[] = selectedTagIds,
+    matchMode: TagMatchMode = tagMatchMode,
+    options: { resetSearch?: boolean } = {},
+  ) => {
+    navigateTopLevel({
+      name: 'board',
+      scope,
+      ...(tagIds.length ? { tagIds, matchMode } : {}),
+    }, { fromScope: scope })
     setProfileOpen(false)
-    if (scope === 'all') setSearchTerm('')
+    if (scope === 'all' && options.resetSearch !== false) setSearchTerm('')
+  }
+
+  const changeBoardScope = (scope: TimeFilterScope, range?: CustomDateRange) => {
+    if (route.name === 'tag-board') {
+      navigateTopLevel({
+        name: 'tag-board',
+        tagIds: route.tagIds,
+        matchMode: route.matchMode,
+        scope,
+        ...(scope === 'custom' && range
+          ? { customStart: range.startDate, customEnd: range.endDate }
+          : {}),
+      }, { fromScope: scope === 'custom' ? fromScope : scope })
+      return
+    }
+    if (scope !== 'custom') navigateToBoard(scope)
+  }
+
+  const navigateToTagBoard = (tagIds: string[], matchMode: TagMatchMode = tagMatchMode) => {
+    if (tagIds.length === 0) {
+      navigateToBoard(boardScope, [], 'all', { resetSearch: false })
+      return
+    }
+    navigateTopLevel({
+      name: 'tag-board',
+      tagIds,
+      matchMode,
+      scope: timeScope,
+      ...(timeScope === 'custom' && customRange
+        ? { customStart: customRange.startDate, customEnd: customRange.endDate }
+        : {}),
+    }, { fromScope: boardScope })
+  }
+
+  const changeTagFilter = (tagIds: string[], matchMode: TagMatchMode) => {
+    if (route.name === 'tag-board') {
+      navigateToTagBoard(tagIds, matchMode)
+      return
+    }
+    navigateToBoard(boardScope, tagIds, matchMode, { resetSearch: false })
   }
 
   const navigateToSettings = () => {
@@ -245,6 +310,9 @@ function App() {
   const countForScope = (scope: BoardScope) =>
     taskData.tasks.filter((task) => taskOverlapsScope(task, scope)).length
 
+  const countForTag = (tagId: string) => taskData.tasks.filter((task) => task.tagIds?.includes(tagId)).length
+  const selectedTagNames = taskData.tags.filter((tag) => selectedTagIds.includes(tag.id)).map((tag) => tag.name)
+
   if (authLoading && !demoMode) return <LoadingScreen />
   if (!user && !demoMode) {
     return <LoginScreen error={authError} onError={setAuthError} />
@@ -285,6 +353,19 @@ function App() {
             )
           })}
         </nav>
+        {taskData.tags.length > 0 && (
+          <div className="sidebar-tag-section">
+            <div className="sidebar-section-title"><span>标签</span><button type="button" onClick={navigateToSettings}>管理</button></div>
+            <nav aria-label="标签看板">
+              {taskData.tags.slice(0, 8).map((tag) => (
+                <button key={tag.id} type="button" className={route.name === 'tag-board' && selectedTagIds.length === 1 && selectedTagIds[0] === tag.id ? 'is-active' : ''} onClick={() => navigateToTagBoard([tag.id], 'all')}>
+                  <span><i className={`tag-color is-${tag.color}`} />{tag.name}</span>
+                  <strong>{countForTag(tag.id)}</strong>
+                </button>
+              ))}
+            </nav>
+          </div>
+        )}
       </aside>
 
       <header className="topbar">
@@ -303,7 +384,7 @@ function App() {
                   <ArrowLeft />
                 </button>
               )}
-              <span>任务</span><b>/</b><strong>{selectedTask ? '详情' : scopeLabels[boardScope]}</strong>
+              <span>任务</span><b>/</b><strong>{selectedTask ? '详情' : route.name === 'tag-board' ? '标签看板' : scopeLabels[boardScope]}</strong>
             </>
           )}
         </div>
@@ -320,11 +401,11 @@ function App() {
           ) : (
             <>
               <span className="brand-mark"><Check /></span>
-              <strong>{settingsOpen ? '设置' : `${scopeLabels[boardScope]}任务`}</strong>
+              <strong>{settingsOpen ? '设置' : route.name === 'tag-board' ? '标签任务' : `${scopeLabels[boardScope]}任务`}</strong>
             </>
           )}
         </div>
-        {route.name === 'board' && (
+        {(route.name === 'board' || route.name === 'tag-board') && (
           <>
             <div ref={mobileSearchRef} className={`search-box ${mobileSearchOpen ? 'is-open' : ''}`}>
               <Search />
@@ -393,8 +474,12 @@ function App() {
               await taskData.deleteTask(selectedTask.id)
               goBackToBoard(boardScope)
             }}
+            onSkipOccurrence={() => taskData.skipOccurrence(selectedTask.id)}
             onNotify={notify}
+            onRecurrenceAdvanced={notifyRecurrenceAdvanced}
             onDirtyChange={setDetailDirty}
+            tags={taskData.tags}
+            onCreateTag={taskData.createTag}
           />
         ) : settingsOpen ? (
           <SettingsView
@@ -410,19 +495,33 @@ function App() {
             }}
             onInstall={pwaInstall.install}
             onNotify={notify}
+            tags={taskData.tags}
+            tasks={taskData.tasks}
+            onCreateTag={taskData.createTag}
+            onUpdateTag={taskData.updateTag}
+            onDeleteTag={taskData.deleteTag}
+            onMergeTags={taskData.mergeTags}
           />
         ) : (
           <TaskBoard
             tasks={taskData.tasks}
-            scope={boardScope}
+            scope={timeScope}
+            customRange={customRange}
+            boardKind={route.name === 'tag-board' ? 'tag' : 'time'}
             hideCompleted={taskData.preferences.hideCompleted}
             searchTerm={searchTerm}
             loading={taskData.loading}
-            onScopeChange={navigateToBoard}
+            onScopeChange={changeBoardScope}
             onOpenTask={(task) => navigate({ name: 'task-detail', taskId: task.id }, { fromScope: boardScope })}
             onTaskAction={handleTaskAction}
             onCreate={() => navigate({ name: 'task-new' }, { fromScope: boardScope })}
             onNotify={notify}
+            tags={taskData.tags}
+            selectedTagIds={selectedTagIds}
+            tagMatchMode={tagMatchMode}
+            onTagFilterChange={changeTagFilter}
+            onRecurrenceAdvanced={notifyRecurrenceAdvanced}
+            title={route.name === 'tag-board' && selectedTagNames.length ? selectedTagNames.map((name) => `#${name}`).join(' + ') : undefined}
             showSwipeHint={showSwipeHint}
             onDismissSwipeHint={dismissSwipeHint}
           />
@@ -479,11 +578,13 @@ function App() {
           onClose={() => goBackToBoard(boardScope)}
           onSubmit={handleCreate}
           onDirtyChange={setFormDirty}
+          tags={taskData.tags}
+          onCreateTag={taskData.createTag}
         />
       )}
 
       {toast && (
-        <div className="app-toast" role="status"><span><CheckSquare2 /></span>{toast}</div>
+        <div className="app-toast" role="status"><span><CheckSquare2 /></span><p>{toast.message}</p>{toast.actionLabel && <button type="button" onClick={() => { toast.onAction?.(); setToast(null) }}>{toast.actionLabel}</button>}</div>
       )}
       <PwaPrompt deferUpdate={formDirty || detailDirty} />
     </div>
