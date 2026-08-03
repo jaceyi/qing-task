@@ -25,6 +25,16 @@
   --apricot: #f2a488;
   --apricot-strong: #dd7251;
   --apricot-soft: #fff0ea;
+  --rose: #e9a1ae;
+  --rose-soft: #fff0f4;
+  --sky: #79b9da;
+  --sky-soft: #edf8fd;
+  --amber: #d7a84f;
+  --amber-soft: #fff7e5;
+  --slate: #8c92a6;
+  --slate-soft: #f0f1f5;
+  --indigo: #697ada;
+  --indigo-soft: #eceefe;
   --danger: #c95461;
   --danger-soft: #fff0f2;
   --shadow-soft: 0 12px 30px rgba(59, 56, 85, 0.08);

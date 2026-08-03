@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, CalendarDays, Check, Layers3, X } from 'lucide-react'
 import { normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
-import type { Task, TaskDraft, TaskType } from '../types'
+import { parseLocalDateTime, previewRecurrence } from '../lib/recurrence'
+import type { Tag, Task, TaskDraft, TaskType } from '../types'
 import { DateTimeInput } from './DateTimeInput'
+import { RecurrenceEditor } from './RecurrenceEditor'
+import { TagPicker } from './TagPicker'
 
 interface TaskFormPanelProps {
   sourceTask?: Task | null
@@ -10,6 +13,8 @@ interface TaskFormPanelProps {
   onClose: () => void
   onSubmit: (draft: TaskDraft, copiedFrom?: string) => Promise<void>
   onDirtyChange?: (dirty: boolean) => void
+  tags?: Tag[]
+  onCreateTag?: (name: string) => Promise<Tag>
 }
 
 function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
@@ -23,6 +28,8 @@ function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
       targetCount: 5,
       count: 0,
       completed: false,
+      tagIds: [],
+      recurrence: null,
     }
   }
   return {
@@ -34,6 +41,8 @@ function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
     targetCount: sourceTask.type === 'progress' ? sourceTask.targetCount : 5,
     count: 0,
     completed: false,
+    tagIds: sourceTask.tagIds ?? [],
+    recurrence: null,
   }
 }
 
@@ -62,6 +71,8 @@ export function TaskFormPanel({
   onClose,
   onSubmit,
   onDirtyChange,
+  tags = [],
+  onCreateTag = async () => { throw new Error('暂时无法创建标签') },
 }: TaskFormPanelProps) {
   const initialDraft = useMemo(() => makeInitialDraft(sourceTask), [sourceTask])
   const initialSignature = useMemo(() => JSON.stringify(initialDraft), [initialDraft])
@@ -178,10 +189,27 @@ export function TaskFormPanel({
       setError('目标次数至少为 1')
       return
     }
+    if (draft.recurrence) {
+      const preview = previewRecurrence(draft.recurrence, 1)[0]
+      const end = parseLocalDateTime(draft.endDate)
+      const nextStart = preview ? parseLocalDateTime(preview.startDate) : null
+      if (!draft.startDate || !draft.endDate) {
+        setError('重复任务必须设置完整的开始和结束时间')
+        return
+      }
+      if (draft.recurrence.end.kind === 'until' && draft.recurrence.end.date < draft.startDate.slice(0, 10)) {
+        setError('重复截止日期不能早于任务开始日期')
+        return
+      }
+      if (nextStart && end && end >= nextStart) {
+        setError('当前时间范围与下一次重复时间重叠，请缩短任务时长或调整频率')
+        return
+      }
+    }
     setSaving(true)
     setError('')
     try {
-      await onSubmit(draft, sourceTask?.title)
+      await onSubmit(draft, sourceTask?.id)
       localStorage.removeItem(draftStorageKey)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '创建任务失败')
@@ -305,6 +333,20 @@ export function TaskFormPanel({
               )}
             </div>
           </fieldset>
+
+          <RecurrenceEditor
+            value={draft.recurrence}
+            startDate={draft.startDate}
+            endDate={draft.endDate}
+            onChange={(recurrence) => setDraft((current) => ({ ...current, recurrence }))}
+          />
+
+          <TagPicker
+            tags={tags}
+            selectedTagIds={draft.tagIds}
+            onChange={(tagIds) => setDraft((current) => ({ ...current, tagIds }))}
+            onCreateTag={onCreateTag}
+          />
 
           {error && <p className="form-error" role="alert">{error}</p>}
 

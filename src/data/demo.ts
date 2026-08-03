@@ -1,5 +1,6 @@
 import { addDays, toDateTimeInput } from '../lib/date'
-import type { Task } from '../types'
+import { createRecurrenceRule, occurrenceKey } from '../lib/recurrence'
+import type { Tag, Task } from '../types'
 
 const today = new Date()
 const date = (offset: number, hour: number, minute = 0) => {
@@ -7,6 +8,13 @@ const date = (offset: number, hour: number, minute = 0) => {
   value.setHours(hour, minute, 0, 0)
   return toDateTimeInput(value)
 }
+
+export const demoTags: Tag[] = [
+  { id: 'tag-work', name: '工作', normalizedName: '工作', color: 'lavender', sortOrder: 1, createdAt: new Date(), updatedAt: new Date() },
+  { id: 'tag-focus', name: '专注', normalizedName: '专注', color: 'indigo', sortOrder: 2, createdAt: new Date(), updatedAt: new Date() },
+  { id: 'tag-health', name: '健康', normalizedName: '健康', color: 'mint', sortOrder: 3, createdAt: new Date(), updatedAt: new Date() },
+  { id: 'tag-life', name: '生活', normalizedName: '生活', color: 'apricot', sortOrder: 4, createdAt: new Date(), updatedAt: new Date() },
+]
 
 export const demoTasks: Task[] = [
   {
@@ -19,6 +27,7 @@ export const demoTasks: Task[] = [
     targetCount: 0,
     count: 0,
     completed: false,
+    tagIds: ['tag-life'],
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -32,6 +41,11 @@ export const demoTasks: Task[] = [
     targetCount: 5,
     count: 3,
     completed: false,
+    tagIds: ['tag-work', 'tag-focus'],
+    recurrence: createRecurrenceRule(date(0, 9), date(0, 17, 30), 'weekly'),
+    seriesState: 'active',
+    currentOccurrenceKey: occurrenceKey(date(0, 9)),
+    occurrenceSequence: 3,
     createdAt: new Date(Date.now() - 1000),
     updatedAt: new Date(),
   },
@@ -45,6 +59,7 @@ export const demoTasks: Task[] = [
     targetCount: 20,
     count: 12,
     completed: false,
+    tagIds: ['tag-health'],
     createdAt: new Date(Date.now() - 2000),
     updatedAt: new Date(),
   },
@@ -58,6 +73,11 @@ export const demoTasks: Task[] = [
     targetCount: 0,
     count: 0,
     completed: false,
+    tagIds: ['tag-focus', 'tag-health'],
+    recurrence: createRecurrenceRule(date(0, 19), date(0, 19, 30), 'daily'),
+    seriesState: 'active',
+    currentOccurrenceKey: occurrenceKey(date(0, 19)),
+    occurrenceSequence: 8,
     createdAt: new Date(Date.now() - 3000),
     updatedAt: new Date(),
   },
@@ -71,6 +91,7 @@ export const demoTasks: Task[] = [
     targetCount: 0,
     count: 0,
     completed: false,
+    tagIds: ['tag-work'],
     createdAt: new Date(Date.now() - 4000),
     updatedAt: new Date(),
   },
@@ -84,6 +105,7 @@ export const demoTasks: Task[] = [
     targetCount: 20,
     count: 20,
     completed: false,
+    tagIds: ['tag-focus'],
     createdAt: new Date(Date.now() - 5000),
     updatedAt: new Date(),
   },
@@ -97,6 +119,7 @@ export const demoTasks: Task[] = [
     targetCount: 0,
     count: 0,
     completed: true,
+    tagIds: ['tag-life'],
     createdAt: new Date(Date.now() - 6000),
     updatedAt: new Date(),
   },

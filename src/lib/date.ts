@@ -1,4 +1,4 @@
-import type { BoardScope, Task } from '../types'
+import type { CustomDateRange, Task, TimeFilterScope } from '../types'
 
 export function startOfLocalDay(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate())
@@ -47,8 +47,19 @@ export function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60_000)
 }
 
-export function getScopeRange(scope: BoardScope, reference = new Date()) {
+export function getScopeRange(
+  scope: TimeFilterScope,
+  reference = new Date(),
+  customRange?: CustomDateRange,
+) {
   if (scope === 'all') return null
+
+  if (scope === 'custom') {
+    const start = parseLocalDate(customRange?.startDate ?? '', 'start')
+    const end = parseLocalDate(customRange?.endDate ?? '', 'end')
+    if (!start || !end || start > end) return undefined
+    return { start, end }
+  }
 
   const today = startOfLocalDay(reference)
   if (scope === 'today') return { start: today, end: new Date(addDays(today, 1).getTime() - 1) }
@@ -60,11 +71,13 @@ export function getScopeRange(scope: BoardScope, reference = new Date()) {
 
 export function taskOverlapsScope(
   task: Pick<Task, 'startDate' | 'endDate'>,
-  scope: BoardScope,
+  scope: TimeFilterScope,
   reference = new Date(),
+  customRange?: CustomDateRange,
 ) {
-  const scopeRange = getScopeRange(scope, reference)
-  if (!scopeRange) return true
+  const scopeRange = getScopeRange(scope, reference, customRange)
+  if (scopeRange === null) return true
+  if (!scopeRange) return false
 
   const taskStart = parseLocalDate(task.startDate, 'start')
   const taskEnd = parseLocalDate(task.endDate, 'end')

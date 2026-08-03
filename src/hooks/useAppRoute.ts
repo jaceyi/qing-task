@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { parseAppRoute, pathForRoute, type AppRoute } from '../lib/routes'
 import type { BoardScope } from '../types'
 
-type TopLevelRoute = Extract<AppRoute, { name: 'board' | 'settings' }>
+type TopLevelRoute = Extract<AppRoute, { name: 'board' | 'tag-board' | 'settings' }>
 
 interface RouteState {
   appRoute?: boolean
