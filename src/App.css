@@ -646,10 +646,31 @@
 
 .task-progress-indicator {
   position: relative;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
   display: grid;
   place-items: center;
   background: #fbfffd;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.task-progress-indicator:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.task-progress-indicator:not(:disabled):hover {
+  background: #f2fbf7;
+}
+
+.task-progress-indicator:not(:disabled):active {
+  transform: scale(0.94);
+}
+
+.task-progress-indicator:not(:disabled):hover .task-progress-ring-track {
+  stroke: #c8e4da;
 }
 
 .task-progress-indicator > svg {
@@ -667,6 +688,7 @@
 
 .task-progress-ring-track {
   stroke: #dcebe6;
+  transition: stroke 160ms ease;
 }
 
 .task-progress-ring-value {
@@ -2749,13 +2771,15 @@ input[role="switch"]:checked::after {
     touch-action: pan-y pinch-zoom;
   }
 
-  .task-check {
+  .task-check,
+  .task-progress-indicator {
     position: relative;
     width: 26px;
     height: 26px;
   }
 
-  .task-check::before {
+  .task-check::before,
+  .task-progress-indicator::before {
     content: "";
     position: absolute;
     inset: -9px;
