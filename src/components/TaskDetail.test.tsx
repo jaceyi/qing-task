@@ -1,6 +1,11 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Task } from '../types'
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider'
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs'
+import { zhCN } from '@mui/x-date-pickers/locales'
+import { ThemeProvider } from '@mui/material'
+import { appTheme } from '../theme'
+import type { Task, TaskLog } from '../types'
 import { TaskDetail } from './TaskDetail'
 
 const task: Task = {
@@ -17,22 +22,26 @@ const task: Task = {
   updatedAt: new Date(),
 }
 
-function renderDetail(onSave = vi.fn(async () => undefined)) {
+function renderDetail(onSave = vi.fn(async () => undefined), logs: TaskLog[] = []) {
   return {
     onSave,
     ...render(
-      <TaskDetail
-        task={task}
-        logs={[]}
-        logsError=""
-        onCopy={vi.fn()}
-        onSave={onSave}
-        onChangeType={vi.fn(async () => undefined)}
-        onSetCompleted={vi.fn(async () => true)}
-        onAdjust={vi.fn(async () => true)}
-        onDelete={vi.fn(async () => undefined)}
-        onNotify={vi.fn()}
-      />,
+      <ThemeProvider theme={appTheme}>
+        <LocalizationProvider dateAdapter={AdapterDayjs} localeText={zhCN.components.MuiLocalizationProvider.defaultProps.localeText}>
+          <TaskDetail
+            task={task}
+            logs={logs}
+            logsError=""
+            onCopy={vi.fn()}
+            onSave={onSave}
+            onChangeType={vi.fn(async () => undefined)}
+            onSetCompleted={vi.fn(async () => true)}
+            onAdjust={vi.fn(async () => true)}
+            onDelete={vi.fn(async () => undefined)}
+            onNotify={vi.fn()}
+          />
+        </LocalizationProvider>
+      </ThemeProvider>,
     ),
   }
 }
@@ -63,5 +72,18 @@ describe('任务详情自动保存', () => {
     })
     expect(await screen.findByRole('alert')).toHaveTextContent('任务名称不能为空')
     expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('描述从空值修改时在变更记录中显示为未填写', () => {
+    renderDetail(vi.fn(async () => undefined), [{
+      id: 'log-description',
+      type: 'update',
+      action: '修改任务描述',
+      payload: { before: '', after: '补充后的任务说明' },
+      createdAt: new Date('2026-08-04T10:00:00'),
+    }])
+
+    expect(screen.getByText('未填写 → 补充后的任务说明')).toBeInTheDocument()
+    expect(screen.queryByText('无时间 → 补充后的任务说明')).not.toBeInTheDocument()
   })
 })

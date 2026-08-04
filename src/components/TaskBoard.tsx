@@ -1,8 +1,34 @@
-import { CalendarDays, CalendarRange, Inbox, Layers3, MoveHorizontal, Plus, SunMedium, Tags, X } from 'lucide-react'
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import dayjs from 'dayjs'
+import {
+  Alert,
+  Autocomplete,
+  Box,
+  Button,
+  Chip,
+  IconButton,
+  Paper,
+  Skeleton,
+  Stack,
+  Tab,
+  Tabs,
+  TextField,
+  ToggleButton,
+  ToggleButtonGroup,
+  Typography,
+} from '@mui/material'
+import AddOutlined from '@mui/icons-material/AddOutlined'
+import CalendarMonthOutlined from '@mui/icons-material/CalendarMonthOutlined'
+import CloseOutlined from '@mui/icons-material/CloseOutlined'
+import DateRangeOutlined from '@mui/icons-material/DateRangeOutlined'
+import InboxOutlined from '@mui/icons-material/InboxOutlined'
+import LayersOutlined from '@mui/icons-material/LayersOutlined'
+import LightModeOutlined from '@mui/icons-material/LightModeOutlined'
+import SwipeOutlined from '@mui/icons-material/SwipeOutlined'
+import { DatePicker } from '@mui/x-date-pickers/DatePicker'
 import { toDateInput } from '../lib/date'
 import { filterAndSortTasks, isTaskComplete } from '../lib/taskLogic'
-import type { BoardScope, CustomDateRange, Tag, TagMatchMode, Task, TimeFilterScope } from '../types'
+import type { CustomDateRange, Tag, TagMatchMode, Task, TimeFilterScope } from '../types'
 import { TaskRow } from './TaskRow'
 
 interface TaskBoardProps {
@@ -16,6 +42,7 @@ interface TaskBoardProps {
   onScopeChange: (scope: TimeFilterScope, customRange?: CustomDateRange) => void
   onOpenTask: (task: Task) => void
   onTaskAction: (task: Task, direction: 'positive' | 'negative') => Promise<boolean>
+  onResetProgress?: (task: Task) => Promise<boolean>
   onCreate: () => void
   onNotify: (message: string) => void
   showSwipeHint?: boolean
@@ -24,24 +51,17 @@ interface TaskBoardProps {
   selectedTagIds?: string[]
   tagMatchMode?: TagMatchMode
   onTagFilterChange?: (tagIds: string[], matchMode: TagMatchMode) => void
-  onRecurrenceAdvanced?: (message: string) => void
+  onUndoableStatusChange?: (message: string) => void
   title?: string
 }
 
-const scopes: Array<{ id: BoardScope; label: string; icon: typeof Layers3 }> = [
-  { id: 'all', label: '全部', icon: Layers3 },
-  { id: 'today', label: '今天', icon: SunMedium },
-  { id: 'week', label: '本周', icon: CalendarRange },
+const scopes = [
+  { id: 'all' as const, label: '全部', icon: <LayersOutlined /> },
+  { id: 'today' as const, label: '今天', icon: <LightModeOutlined /> },
+  { id: 'week' as const, label: '本周', icon: <CalendarMonthOutlined /> },
 ]
-
-const customScope = { id: 'custom' as const, label: '自定义', icon: CalendarDays }
-
-const scopeTitles: Record<TimeFilterScope, string> = {
-  today: '今日任务',
-  week: '本周任务',
-  all: '全部任务',
-  custom: '自定义时间任务',
-}
+const customScope = { id: 'custom' as const, label: '自定义', icon: <DateRangeOutlined /> }
+const scopeTitles: Record<TimeFilterScope, string> = { today: '今日任务', week: '本周任务', all: '全部任务', custom: '自定义时间任务' }
 
 export function TaskBoard({
   tasks,
@@ -54,6 +74,7 @@ export function TaskBoard({
   onScopeChange,
   onOpenTask,
   onTaskAction,
+  onResetProgress,
   onCreate,
   onNotify,
   showSwipeHint = false,
@@ -62,43 +83,25 @@ export function TaskBoard({
   selectedTagIds = [],
   tagMatchMode = 'all',
   onTagFilterChange,
-  onRecurrenceAdvanced,
+  onUndoableStatusChange,
   title,
 }: TaskBoardProps) {
-  const [tagFilterOpen, setTagFilterOpen] = useState(false)
-  const [customDraft, setCustomDraft] = useState<CustomDateRange>(() => customRange ?? {
-    startDate: toDateInput(),
-    endDate: toDateInput(),
-  })
-  const availableScopes = useMemo(
-    () => boardKind === 'tag' ? [...scopes, customScope] : scopes,
-    [boardKind],
-  )
-  const visibleTasks = filterAndSortTasks(tasks, scope, hideCompleted, searchTerm, new Date(), {
-    tags,
-    selectedTagIds,
-    matchMode: tagMatchMode,
-    customRange,
-  })
+  const [customDraft, setCustomDraft] = useState<CustomDateRange>(() => customRange ?? { startDate: toDateInput(), endDate: toDateInput() })
+  const availableScopes = useMemo(() => boardKind === 'tag' ? [...scopes, customScope] : scopes, [boardKind])
+  const visibleTasks = filterAndSortTasks(tasks, scope, hideCompleted, searchTerm, new Date(), { tags, selectedTagIds, matchMode: tagMatchMode, customRange })
   const active = visibleTasks.filter((task) => !isTaskComplete(task))
   const completed = visibleTasks.filter(isTaskComplete)
   const selectedTags = tags.filter((tag) => selectedTagIds.includes(tag.id))
-  const customRangeError = customDraft.startDate && customDraft.endDate && customDraft.startDate > customDraft.endDate
-    ? '结束日期不能早于开始日期'
-    : ''
+  const customRangeError = customDraft.startDate && customDraft.endDate && customDraft.startDate > customDraft.endDate ? '结束日期不能早于开始日期' : ''
 
-  useEffect(() => {
-    if (customRange) setCustomDraft(customRange)
-  }, [customRange])
+  useEffect(() => { if (customRange) setCustomDraft(customRange) }, [customRange])
 
   const selectScope = (nextScope: TimeFilterScope) => {
     if (nextScope === 'custom') {
       const nextRange = customRange ?? customDraft
       setCustomDraft(nextRange)
       onScopeChange(nextScope, nextRange)
-      return
-    }
-    onScopeChange(nextScope)
+    } else onScopeChange(nextScope)
   }
 
   const applyCustomRange = (event: FormEvent) => {
@@ -107,170 +110,118 @@ export function TaskBoard({
     onScopeChange('custom', customDraft)
   }
 
-  const handleScopeKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentScope: TimeFilterScope) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-    event.preventDefault()
-    const currentIndex = availableScopes.findIndex(({ id }) => id === currentScope)
-    const nextIndex = event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? availableScopes.length - 1
-        : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + availableScopes.length) % availableScopes.length
-    const nextScope = availableScopes[nextIndex].id
-    selectScope(nextScope)
-    document.getElementById(`scope-tab-${nextScope}`)?.focus()
-  }
+  const groupHeading = (label: string, count: number) => (
+    <Box className="flex h-10 items-center gap-2 px-2 text-xs tracking-[0.08em] text-muted max-md:px-0.5">
+      <span>{label}</span>
+      <strong className="grid h-5 min-w-[22px] place-items-center rounded-[7px] bg-primary-soft font-mono text-[11px] font-semibold text-primary-strong">{count}</strong>
+    </Box>
+  )
 
   return (
-    <section className="board-view" aria-labelledby="page-title">
-      <div className="mobile-board-header">
-        <h1 id="page-title">{title ?? scopeTitles[scope]}</h1>
-      </div>
+    <Box component="section" className="mx-auto w-full max-w-[900px]" aria-labelledby="page-title">
+      <Box className="mb-5 flex items-end justify-between max-md:hidden">
+        <Typography id="page-title" component="h1" className="text-[clamp(22px,2vw,26px)] leading-[1.18] tracking-[-0.035em] text-ink">{title ?? scopeTitles[scope]}</Typography>
+      </Box>
 
-      <div className={`scope-tabs ${boardKind === 'tag' ? 'is-tag-time-filter' : ''}`} role="tablist" aria-label="任务时间范围">
-        {availableScopes.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            id={`scope-tab-${id}`}
-            type="button"
-            role="tab"
-            aria-selected={scope === id}
-            aria-controls="task-scope-panel"
-            tabIndex={scope === id ? 0 : -1}
-            className={scope === id ? 'is-active' : ''}
-            onClick={() => selectScope(id)}
-            onKeyDown={(event) => handleScopeKeyDown(event, id)}
-          >
-            <Icon />
-            {label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className={boardKind === 'tag' ? 'mb-4 w-full lg:w-[min(100%,430px)]' : 'mb-4 hidden w-full max-md:flex'}
+        value={scope}
+        onChange={(_, value) => selectScope(value)}
+        aria-label="任务时间范围"
+        variant="fullWidth"
+      >
+        {availableScopes.map(({ id, label, icon }) => <Tab key={id} id={`scope-tab-${id}`} value={id} icon={icon} iconPosition="start" label={label} />)}
+      </Tabs>
 
       {boardKind === 'tag' && scope === 'custom' && (
-        <form className="custom-time-filter" onSubmit={applyCustomRange}>
-          <span>时间范围</span>
-          <label>
-            <span>开始</span>
-            <input type="date" value={customDraft.startDate} onChange={(event) => setCustomDraft((current) => ({ ...current, startDate: event.target.value }))} />
-          </label>
-          <i>至</i>
-          <label>
-            <span>结束</span>
-            <input type="date" value={customDraft.endDate} onChange={(event) => setCustomDraft((current) => ({ ...current, endDate: event.target.value }))} />
-          </label>
-          <button type="submit" disabled={!customDraft.startDate || !customDraft.endDate || Boolean(customRangeError)}>应用</button>
-          {customRangeError && <small role="alert">{customRangeError}</small>}
-        </form>
+        <Paper component="form" variant="outlined" className="mb-4 grid grid-cols-1 items-start gap-3 p-4 sm:grid-cols-[1fr_1fr_auto]" onSubmit={applyCustomRange}>
+          <DatePicker
+            label="开始日期"
+            value={customDraft.startDate ? dayjs(customDraft.startDate) : null}
+            onChange={(value) => setCustomDraft((current) => ({
+              ...current,
+              startDate: value?.isValid() ? value.format('YYYY-MM-DD') : '',
+            }))}
+            slotProps={{ actionBar: { actions: ['clear', 'cancel', 'accept'] } }}
+          />
+          <DatePicker
+            label="结束日期"
+            value={customDraft.endDate ? dayjs(customDraft.endDate) : null}
+            onChange={(value) => setCustomDraft((current) => ({
+              ...current,
+              endDate: value?.isValid() ? value.format('YYYY-MM-DD') : '',
+            }))}
+            slotProps={{
+              actionBar: { actions: ['clear', 'cancel', 'accept'] },
+              textField: { error: Boolean(customRangeError), helperText: customRangeError },
+            }}
+          />
+          <Button className="min-h-10" type="submit" variant="contained" disabled={!customDraft.startDate || !customDraft.endDate || Boolean(customRangeError)}>应用</Button>
+        </Paper>
       )}
 
       {boardKind === 'time' && tags.length > 0 && (
-        <div className={`board-tag-filter ${tagFilterOpen ? 'is-open' : ''}`}>
-          <button type="button" className="tag-filter-trigger" aria-expanded={tagFilterOpen} onClick={() => setTagFilterOpen((open) => !open)}>
-            <Tags />
-            <span>{selectedTags.length ? selectedTags.map((tag) => tag.name).join(' + ') : '按标签筛选'}</span>
-            {selectedTagIds.length > 0 && <strong>{selectedTagIds.length}</strong>}
-          </button>
+        <Box className={`mb-4 grid gap-3 sm:grid-cols-[1fr_auto] ${selectedTagIds.length > 1 ? '' : 'sm:grid-cols-1'}`}>
+          <Autocomplete
+            multiple
+            openOnFocus
+            forcePopupIcon
+            options={tags}
+            value={selectedTags}
+            onChange={(_, value) => onTagFilterChange?.(value.map((tag) => tag.id), tagMatchMode)}
+            getOptionLabel={(tag) => tag.name}
+            isOptionEqualToValue={(option, value) => option.id === value.id}
+            sx={{ '& .MuiInputBase-root': { minHeight: 40 } }}
+            renderValue={(value, getItemProps) => value.map((tag, index) => <Chip {...getItemProps({ index })} key={tag.id} label={tag.name} className={`tag-chip is-${tag.color}`} />)}
+            renderOption={(props, option) => (
+              <Box component="li" {...props} key={option.id} sx={{ display: 'flex', gap: 1 }}>
+                <Box component="i" className={`tag-color is-${option.color}`} />
+                {option.name}
+              </Box>
+            )}
+            renderInput={(params) => <TextField {...params} label="按标签筛选" placeholder={selectedTags.length ? '' : '全部标签'} />}
+          />
           {selectedTagIds.length > 1 && (
-            <div className="tag-match-toggle" aria-label="标签匹配方式">
-              <button type="button" className={tagMatchMode === 'all' ? 'is-active' : ''} onClick={() => onTagFilterChange?.(selectedTagIds, 'all')}>匹配全部</button>
-              <button type="button" className={tagMatchMode === 'any' ? 'is-active' : ''} onClick={() => onTagFilterChange?.(selectedTagIds, 'any')}>匹配任一</button>
-            </div>
+            <ToggleButtonGroup exclusive value={tagMatchMode} onChange={(_, mode) => mode && onTagFilterChange?.(selectedTagIds, mode)} aria-label="标签匹配方式">
+              <ToggleButton value="all">匹配全部</ToggleButton><ToggleButton value="any">匹配任一</ToggleButton>
+            </ToggleButtonGroup>
           )}
-          {selectedTagIds.length > 0 && <button type="button" className="clear-tag-filter" onClick={() => onTagFilterChange?.([], 'all')}><X />清除</button>}
-          {tagFilterOpen && (
-            <div className="tag-filter-panel">
-              {tags.map((tag) => {
-                const selected = selectedTagIds.includes(tag.id)
-                return <button key={tag.id} type="button" aria-pressed={selected} className={selected ? 'is-active' : ''} onClick={() => onTagFilterChange?.(selected ? selectedTagIds.filter((id) => id !== tag.id) : [...selectedTagIds, tag.id], tagMatchMode)}><i className={`tag-color is-${tag.color}`} />{tag.name}</button>
-              })}
-            </div>
-          )}
-        </div>
+        </Box>
       )}
 
       {showSwipeHint && (
-        <div className="mobile-swipe-hint" role="note">
-          <MoveHorizontal />
-          <span><strong>左右滑动任务</strong><small>快速完成、推进或回退</small></span>
-          <button type="button" aria-label="知道了" onClick={onDismissSwipeHint}><X /></button>
-        </div>
+        <Alert icon={<SwipeOutlined />} severity="info" className="mb-4" action={<IconButton aria-label="知道了" onClick={onDismissSwipeHint}><CloseOutlined /></IconButton>}>
+          <strong>左右滑动任务</strong>，可快速完成、推进或回退。
+        </Alert>
       )}
 
-      <div
-        id="task-scope-panel"
-        role="tabpanel"
-        aria-labelledby={`scope-tab-${scope}`}
-        tabIndex={0}
-      >
+      <Box id="task-scope-panel" role="tabpanel" aria-labelledby={`scope-tab-${scope}`} tabIndex={0}>
         {loading ? (
-          <div className="task-skeleton" aria-label="正在加载任务">
-            {Array.from({ length: 6 }, (_, index) => (
-              <span key={index} />
-            ))}
-          </div>
+          <Stack spacing={1}>{Array.from({ length: 6 }, (_, index) => <Skeleton key={index} variant="rounded" height={72} />)}</Stack>
         ) : visibleTasks.length === 0 ? (
-          <div className="empty-state">
-            <span className="empty-icon"><Inbox /></span>
-            <h2>{searchTerm ? '没有匹配的任务' : '这里还没有任务'}</h2>
-            <p>
-              {searchTerm
-                ? '换个关键词再试试。'
-                : scope === 'all'
-                  ? '创建一个任务，时间可以稍后再安排。'
-                  : '暂时没有落在这个时间范围内的任务。'}
-            </p>
-            {!searchTerm && (
-              <button type="button" className="primary-button" onClick={onCreate}>
-                <Plus />
-                新建任务
-              </button>
-            )}
-          </div>
+          <Paper className="px-4 py-14 text-center" variant="outlined">
+            <InboxOutlined sx={{ fontSize: 38, color: 'primary.main', mb: 1 }} />
+            <Typography component="h2" sx={{ fontSize: 16, fontWeight: 750 }}>{searchTerm ? '没有匹配的任务' : '这里还没有任务'}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>{searchTerm ? '换个关键词再试试。' : scope === 'all' ? '创建一个任务，时间可以稍后再安排。' : '暂时没有落在这个时间范围内的任务。'}</Typography>
+            {!searchTerm && <Button variant="contained" startIcon={<AddOutlined />} onClick={onCreate}>新建任务</Button>}
+          </Paper>
         ) : (
-          <div className="task-list" data-testid="task-list">
-          {active.length > 0 && (
-            <div className="task-group">
-              <div className="task-group-heading">
-                <span>进行中</span>
-                <strong>{active.length}</strong>
-              </div>
-              {active.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  onOpen={() => onOpenTask(task)}
-                  onAction={(direction) => onTaskAction(task, direction)}
-                  onNotify={onNotify}
-                  onRecurrenceAdvanced={onRecurrenceAdvanced}
-                  tags={tags}
-                />
-              ))}
-            </div>
-          )}
-
-          {completed.length > 0 && (
-            <div className="task-group completed-group">
-              <div className="task-group-heading">
-                <span>已完成</span>
-                <strong>{completed.length}</strong>
-              </div>
-              {completed.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  onOpen={() => onOpenTask(task)}
-                  onAction={(direction) => onTaskAction(task, direction)}
-                  onNotify={onNotify}
-                  onRecurrenceAdvanced={onRecurrenceAdvanced}
-                  tags={tags}
-                />
-              ))}
-            </div>
-          )}
-          </div>
+          <Box className="border-t border-line-strong max-md:border-t-0" data-testid="task-list">
+            {active.length > 0 && (
+              <Box>
+                {groupHeading('进行中', active.length)}
+                {active.map((task) => <TaskRow key={task.id} task={task} onOpen={() => onOpenTask(task)} onAction={(direction) => onTaskAction(task, direction)} onResetProgress={onResetProgress ? () => onResetProgress(task) : undefined} onNotify={onNotify} onUndoableStatusChange={onUndoableStatusChange} tags={tags} />)}
+              </Box>
+            )}
+            {completed.length > 0 && (
+              <Box className="mt-4 max-md:mt-5">
+                {groupHeading('已完成', completed.length)}
+                {completed.map((task) => <TaskRow key={task.id} task={task} onOpen={() => onOpenTask(task)} onAction={(direction) => onTaskAction(task, direction)} onResetProgress={onResetProgress ? () => onResetProgress(task) : undefined} onNotify={onNotify} onUndoableStatusChange={onUndoableStatusChange} tags={tags} />)}
+              </Box>
+            )}
+          </Box>
         )}
-      </div>
-    </section>
+      </Box>
+    </Box>
   )
 }

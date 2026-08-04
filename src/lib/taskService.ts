@@ -18,7 +18,7 @@ import {
 import { db } from './firebase'
 import { nextOccurrence, occurrenceKey } from './recurrence'
 import { cleanTagName, dedupeTagIds, normalizeTagName } from './tagLogic'
-import { normalizeTaskDraft, switchedTaskValues, updatedTaskInfo } from './taskLogic'
+import { completedOccurrenceTaskId, normalizeTaskDraft, switchedTaskValues, updatedTaskInfo } from './taskLogic'
 import type {
   RecurrenceRule,
   SyncState,
@@ -86,11 +86,12 @@ function mapRecurrence(value: unknown): RecurrenceRule | null {
     ...(Array.isArray(data.byWeekdays)
       ? { byWeekdays: data.byWeekdays.filter((day): day is 1 | 2 | 3 | 4 | 5 | 6 | 7 => Number.isInteger(day) && day >= 1 && day <= 7) }
       : {}),
+    ...(Number.isInteger(data.byMonth) ? { byMonth: Number(data.byMonth) } : {}),
     ...(Number.isInteger(data.byMonthDay) ? { byMonthDay: Number(data.byMonthDay) } : {}),
     end,
     timeZone: String(data.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone),
     anchorStart: String(data.anchorStart ?? ''),
-    durationMinutes: Math.max(1, Number(data.durationMinutes ?? 1)),
+    durationMinutes: Math.max(0, Number(data.durationMinutes ?? 0)),
   }
 }
 
@@ -329,6 +330,21 @@ export function setSingleCompletion(
   return { result: true, committed: batch.commit() }
 }
 
+/** 已完成（或进行过）的进度任务一键归零；不可叠加撤销，与本机的“重置进度”日志对应。 */
+export function resetTaskProgress(
+  userId: string,
+  current: Task,
+): QueuedMutation<boolean> {
+  if (current.type !== 'progress' || current.count <= 0) return unchanged(false)
+  const batch = writeBatch(db)
+  batch.update(taskRef(userId, current.id), { count: 0, updatedAt: serverTimestamp() })
+  batch.set(
+    newLogRef(userId, current.id),
+    logData('progress', '重置进度', { before: current.count, after: 0 }),
+  )
+  return { result: true, committed: batch.commit() }
+}
+
 export function adjustTaskProgress(
   userId: string,
   current: Task,
@@ -384,6 +400,7 @@ export function advanceRecurringTask(
       createdAt: serverTimestamp(),
     },
   )
+  const instanceTaskId = result === 'completed' && next ? completedOccurrenceTaskId(current.id, key) : null
   batch.set(
     newLogRef(userId, current.id),
     logData('recurrence', result === 'completed' ? '完成本次重复任务' : '跳过本次重复任务', {
@@ -394,9 +411,43 @@ export function advanceRecurringTask(
       count: result === 'completed' && current.type === 'progress' ? current.targetCount : current.count,
       targetCount: current.targetCount,
       completedAt: completedAt.toISOString(),
+      ...(instanceTaskId ? { instanceTaskId } : {}),
     }),
   )
   if (next) {
+    if (result === 'completed' && instanceTaskId) {
+      batch.set(taskRef(userId, instanceTaskId), {
+        title: current.title,
+        description: current.description,
+        startDate: current.startDate,
+        endDate: current.endDate,
+        type: current.type,
+        targetCount: current.targetCount,
+        count: current.type === 'progress' ? current.targetCount : 0,
+        completed: current.type === 'single',
+        schemaVersion: 2,
+        tagIds: dedupeTagIds(current.tagIds),
+        recurrence: null,
+        seriesState: null,
+        currentOccurrenceKey: null,
+        occurrenceSequence: 0,
+        lastAdvanceMutationId: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+      // 实例任务的第一个记录：我自己什么时候完成的。
+      batch.set(
+        newLogRef(userId, instanceTaskId),
+        logData('progress', '完成任务', {
+          occurrenceKey: key,
+          scheduledStart: current.startDate,
+          scheduledEnd: current.endDate,
+          count: current.type === 'progress' ? current.targetCount : current.count,
+          targetCount: current.targetCount,
+          completedAt: completedAt.toISOString(),
+        }),
+      )
+    }
     batch.update(taskRef(userId, current.id), {
       startDate: next.startDate,
       endDate: next.endDate,
@@ -412,7 +463,14 @@ export function advanceRecurringTask(
     batch.update(taskRef(userId, current.id), {
       count: current.type === 'progress' && result === 'completed' ? current.targetCount : current.count,
       completed: current.type === 'single' && result === 'completed',
-      seriesState: 'ended',
+      ...(result === 'completed'
+        ? {
+            recurrence: null,
+            seriesState: null,
+            currentOccurrenceKey: null,
+            occurrenceSequence: 0,
+          }
+        : { seriesState: 'ended' }),
       lastAdvanceMutationId: mutationId,
       updatedAt: serverTimestamp(),
     })
@@ -427,12 +485,10 @@ export function undoRecurringAdvance(
 ): QueuedMutation<boolean> {
   if (!previous.recurrence || current.id !== previous.id) return unchanged(false)
   const mutationId = crypto.randomUUID()
+  const previousKey = previous.currentOccurrenceKey ?? occurrenceKey(previous.startDate)
   const batch = writeBatch(db)
-  batch.delete(occurrenceRef(
-    userId,
-    current.id,
-    previous.currentOccurrenceKey ?? occurrenceKey(previous.startDate),
-  ))
+  batch.delete(occurrenceRef(userId, current.id, previousKey))
+  batch.delete(taskRef(userId, completedOccurrenceTaskId(previous.id, previousKey)))
   batch.update(taskRef(userId, current.id), {
     startDate: previous.startDate,
     endDate: previous.endDate,
@@ -457,6 +513,53 @@ export function undoRecurringAdvance(
 
 export function skipRecurringOccurrence(userId: string, current: Task) {
   return advanceRecurringTask(userId, current, 'skipped')
+}
+
+/** 撤销进度重置：按绝对值恢复 count。 */
+export function restoreTaskProgress(
+  userId: string,
+  current: Task,
+  count: number,
+): QueuedMutation<boolean> {
+  if (current.type !== 'progress') return unchanged(false)
+  const nextCount = Math.max(0, Math.min(current.targetCount, count))
+  if (nextCount === current.count) return unchanged(false)
+  const batch = writeBatch(db)
+  batch.update(taskRef(userId, current.id), { count: nextCount, updatedAt: serverTimestamp() })
+  batch.set(
+    newLogRef(userId, current.id),
+    logData('progress', '撤销重置', { before: current.count, after: nextCount }),
+  )
+  return { result: true, committed: batch.commit() }
+}
+
+/** 把主任务在当前周期内的“进度 ±1”日志转移到完成的实例任务下，主任务保留一条“完成本次重复任务”。 */
+export async function migrateProgressLogsToCompletedInstance(
+  userId: string,
+  taskId: string,
+  instanceTaskId: string,
+): Promise<void> {
+  const snapshot = await getDocs(collection(db, 'users', userId, 'tasks', taskId, 'logs'))
+  const batch = writeBatch(db)
+  let moved = 0
+  for (const entry of snapshot.docs) {
+    const data = entry.data()
+    if (data.type === 'progress' && (data.action === '进度 +1' || data.action === '进度 −1')) {
+      batch.set(doc(db, 'users', userId, 'tasks', instanceTaskId, 'logs', entry.id), data)
+      batch.delete(entry.ref)
+      moved += 1
+    }
+  }
+  if (moved > 0) await batch.commit()
+}
+
+/** 清掉任务的日志子集合（用于撤销完成时一并移除实例任务的日志）。 */
+export async function deleteTaskLogs(userId: string, taskId: string): Promise<void> {
+  const snapshot = await getDocs(collection(db, 'users', userId, 'tasks', taskId, 'logs'))
+  if (snapshot.empty) return
+  const batch = writeBatch(db)
+  for (const entry of snapshot.docs) batch.delete(entry.ref)
+  await batch.commit()
 }
 
 export async function createTag(

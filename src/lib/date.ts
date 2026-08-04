@@ -81,8 +81,10 @@ export function taskOverlapsScope(
 
   const taskStart = parseLocalDate(task.startDate, 'start')
   const taskEnd = parseLocalDate(task.endDate, 'end')
-  if (!taskStart || !taskEnd) return false
-  return taskStart <= scopeRange.end && taskEnd >= scopeRange.start
+  if (!taskStart && !taskEnd) return false
+  const effectiveStart = taskStart ?? taskEnd!
+  const effectiveEnd = taskEnd ?? taskStart!
+  return effectiveStart <= scopeRange.end && effectiveEnd >= scopeRange.start
 }
 
 export function formatDateRange(startDate: string, endDate: string) {
@@ -101,6 +103,10 @@ export function formatDateRange(startDate: string, endDate: string) {
   if (start && !end) return `${formatPoint(start)} 起`
   if (!start || !end) return '无时间'
 
+  if (normalizeDateTimeInput(startDate) === normalizeDateTimeInput(endDate)) {
+    return formatPoint(start)
+  }
+
   if (!hasMinute) {
     if (startDate === endDate) return formatDay(start)
     return `${formatDay(start)} – ${formatDay(end)}`
@@ -113,9 +119,7 @@ export function formatDateRange(startDate: string, endDate: string) {
 }
 
 export function validateTaskDateRange(startDate: string, endDate: string) {
-  if (!startDate && !endDate) return ''
-  if (!startDate || !endDate) return '请同时填写开始和结束时间，或都留空'
-  if (startDate > endDate) return '结束日期不能早于开始日期'
+  if (startDate && endDate && startDate > endDate) return '结束日期不能早于开始日期'
   return ''
 }
 

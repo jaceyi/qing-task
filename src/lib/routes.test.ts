@@ -14,14 +14,12 @@ describe('应用路由', () => {
   it('详情与复制路由支持安全编码', () => {
     const detailPath = pathForRoute({ name: 'task-detail', taskId: '任务 / 1' })
     expect(parseAppRoute(detailPath)).toEqual({ name: 'task-detail', taskId: '任务 / 1' })
-    expect(parseAppRoute('/tasks/new', '?copy=task-1')).toEqual({
-      name: 'task-new',
-      copiedFrom: 'task-1',
-    })
+    // 新建任务不再占用路由：旧链接重定向回全部任务列表
+    expect(parseAppRoute('/tasks/new', '?copy=task-1')).toEqual({ name: 'board', scope: 'all' })
   })
 
-  it('标签看板保留多标签、匹配方式和时间范围', () => {
-    const route = { name: 'tag-board' as const, tagIds: ['工作', 'waiting'], matchMode: 'any' as const, scope: 'week' as const }
+  it('标签看板使用动态标签参数并保留时间范围', () => {
+    const route = { name: 'tag-board' as const, tagId: '工作 标签', scope: 'week' as const }
     const path = pathForRoute(route)
     const url = new URL(path, 'https://example.com')
     expect(parseAppRoute(url.pathname, url.search)).toEqual(route)
@@ -38,8 +36,7 @@ describe('应用路由', () => {
   it('标签看板支持可分享的自定义时间范围', () => {
     const route = {
       name: 'tag-board' as const,
-      tagIds: ['工作'],
-      matchMode: 'all' as const,
+      tagId: '工作',
       scope: 'custom' as const,
       customStart: '2026-07-01',
       customEnd: '2026-07-31',
@@ -47,5 +44,13 @@ describe('应用路由', () => {
     const path = pathForRoute(route)
     const url = new URL(path, 'https://example.com')
     expect(parseAppRoute(url.pathname, url.search)).toEqual(route)
+  })
+
+  it('旧标签看板地址会解析为单标签路由', () => {
+    expect(parseAppRoute(routeDefinitions.legacyTags, '?ids=work,focus&scope=today')).toEqual({
+      name: 'tag-board',
+      tagId: 'work',
+      scope: 'today',
+    })
   })
 })

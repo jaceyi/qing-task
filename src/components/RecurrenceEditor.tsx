@@ -1,22 +1,41 @@
-import { useMemo, useState } from 'react'
-import { CalendarClock, ChevronDown, Repeat2 } from 'lucide-react'
+import { useMemo } from 'react'
+import dayjs from 'dayjs'
+import {
+  Box,
+  Button,
+  FormControl,
+  FormHelperText,
+  MenuItem,
+  Paper,
+  Stack,
+  TextField,
+  ToggleButton,
+  ToggleButtonGroup,
+  Typography,
+} from '@mui/material'
+import CheckOutlined from '@mui/icons-material/CheckOutlined'
+import RepeatOutlined from '@mui/icons-material/RepeatOutlined'
+import { DatePicker } from '@mui/x-date-pickers/DatePicker'
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker'
+import { TimePicker } from '@mui/x-date-pickers/TimePicker'
 import { formatDateRange } from '../lib/date'
 import {
   createRecurrenceRule,
   describeRecurrence,
   parseLocalDateTime,
   previewRecurrence,
-  syncRecurrenceTiming,
+  toLocalDateTime,
   weekdayFor,
 } from '../lib/recurrence'
 import type { RecurrenceFrequency, RecurrenceRule, Weekday } from '../types'
+import { FieldLabel } from './FieldLabel'
 
 interface RecurrenceEditorProps {
   value: RecurrenceRule | null | undefined
   startDate: string
   endDate: string
   onChange: (value: RecurrenceRule | null) => void
-  compact?: boolean
+  onTimingChange: (startDate: string, endDate: string) => void
 }
 
 const weekdayOptions: Array<{ value: Weekday; label: string }> = [
@@ -29,176 +48,314 @@ const weekdayOptions: Array<{ value: Weekday; label: string }> = [
   { value: 7, label: '日' },
 ]
 
-function presetFor(rule: RecurrenceRule | null | undefined) {
-  if (!rule) return 'none'
-  const days = [...(rule.byWeekdays ?? [])].sort().join(',')
-  if (rule.frequency === 'daily' && rule.interval === 1) return 'daily'
-  if (rule.frequency === 'weekly' && rule.interval === 1 && days === '1,2,3,4,5') return 'weekdays'
-  if (rule.frequency === 'weekly' && rule.interval === 1 && days === '6,7') return 'weekends'
-  if (rule.frequency === 'weekly' && rule.interval === 1 && rule.byWeekdays?.length === 1) return 'weekly'
-  if (rule.frequency === 'weekly' && rule.interval === 2 && rule.byWeekdays?.length === 1) return 'biweekly'
-  if (rule.frequency === 'monthly' && rule.interval === 1) return 'monthly'
-  if (rule.frequency === 'monthly' && rule.interval === 3) return 'quarterly'
-  if (rule.frequency === 'monthly' && rule.interval === 6) return 'semiannual'
-  if (rule.frequency === 'yearly' && rule.interval === 1) return 'yearly'
-  return 'custom'
+const frequencyOptions: Array<{ value: Exclude<RecurrenceFrequency, 'hourly'>; label: string }> = [
+  { value: 'daily', label: '天' },
+  { value: 'weekly', label: '周' },
+  { value: 'monthly', label: '月' },
+  { value: 'yearly', label: '年' },
+]
+
+function pad(value: number) {
+  return String(value).padStart(2, '0')
 }
 
-export function RecurrenceEditor({ value, startDate, endDate, onChange, compact = false }: RecurrenceEditorProps) {
-  const [open, setOpen] = useState(!compact && Boolean(value))
-  const [message, setMessage] = useState('')
-  const timeReady = Boolean(parseLocalDateTime(startDate) && parseLocalDateTime(endDate))
-  const rule = useMemo(
-    () => syncRecurrenceTiming(value, startDate, endDate),
-    [endDate, startDate, value],
-  )
-  const preset = presetFor(rule)
+function nextDefaultStart() {
+  const value = new Date()
+  value.setSeconds(0, 0)
+  value.setMinutes(0)
+  value.setHours(value.getHours() + 1)
+  return value
+}
+
+function validCalendarDate(year: number, month: number, day: number, hour: number, minute: number) {
+  const value = new Date(year, month - 1, day, hour, minute, 0, 0)
+  return value.getFullYear() === year && value.getMonth() === month - 1 && value.getDate() === day
+    ? value
+    : null
+}
+
+function alignStart(rule: RecurrenceRule, base: Date, time: string) {
+  const [hour, minute] = time.split(':').map(Number)
+  const safeHour = Number.isInteger(hour) ? Math.max(0, Math.min(23, hour)) : 9
+  const safeMinute = Number.isInteger(minute) ? Math.max(0, Math.min(59, minute)) : 0
+
+  if (rule.frequency === 'daily' || rule.frequency === 'hourly') {
+    return new Date(base.getFullYear(), base.getMonth(), base.getDate(), safeHour, safeMinute, 0, 0)
+  }
+
+  if (rule.frequency === 'weekly') {
+    const weekdays = rule.byWeekdays?.length ? rule.byWeekdays : [weekdayFor(base)]
+    for (let offset = 0; offset < 14; offset += 1) {
+      const candidate = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset, safeHour, safeMinute, 0, 0)
+      if (weekdays.includes(weekdayFor(candidate))) return candidate
+    }
+  }
+
+  if (rule.frequency === 'monthly') {
+    const day = Math.max(1, Math.min(31, rule.byMonthDay ?? base.getDate()))
+    for (let offset = 0; offset < 24; offset += 1) {
+      const monthIndex = base.getMonth() + offset
+      const year = base.getFullYear() + Math.floor(monthIndex / 12)
+      const month = ((monthIndex % 12) + 12) % 12 + 1
+      const candidate = validCalendarDate(year, month, day, safeHour, safeMinute)
+      if (candidate && (offset > 0 || day >= base.getDate())) return candidate
+    }
+  }
+
+  const month = Math.max(1, Math.min(12, rule.byMonth ?? base.getMonth() + 1))
+  const day = Math.max(1, Math.min(31, rule.byMonthDay ?? base.getDate()))
+  for (let offset = 0; offset < 12; offset += 1) {
+    const candidate = validCalendarDate(base.getFullYear() + offset, month, day, safeHour, safeMinute)
+    if (candidate && (
+      offset > 0
+      || month > base.getMonth() + 1
+      || (month === base.getMonth() + 1 && day >= base.getDate())
+    )) return candidate
+  }
+  return base
+}
+
+function timeFrom(value: string) {
+  const parsed = parseLocalDateTime(value)
+  return parsed ? `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}` : '09:00'
+}
+
+function formatPreviewDate(startDate: string, endDate: string, includeYear: boolean) {
+  const display = formatDateRange(startDate, endDate)
+  if (!includeYear) return display
+  const start = parseLocalDateTime(startDate)
+  return start ? `${start.getFullYear()}年 ${display}` : display
+}
+
+function withoutUndefined(rule: RecurrenceRule) {
+  return Object.fromEntries(Object.entries(rule).filter(([, item]) => item !== undefined)) as unknown as RecurrenceRule
+}
+
+export function RecurrenceEditor({
+  value,
+  startDate,
+  endDate,
+  onChange,
+  onTimingChange,
+}: RecurrenceEditorProps) {
+  const rule = value ?? null
+  const time = timeFrom(startDate || endDate)
   const previews = useMemo(() => rule ? previewRecurrence(rule, 3) : [], [rule])
 
-  const choosePreset = (nextPreset: string) => {
-    setMessage('')
-    if (nextPreset === 'none') {
-      onChange(null)
-      setOpen(false)
-      return
-    }
-    if (!timeReady) {
-      setMessage('先设置完整的开始和结束时间，再开启重复。')
-      setOpen(true)
-      return
-    }
-    const start = parseLocalDateTime(startDate)!
-    const next = createRecurrenceRule(startDate, endDate)
-    if (nextPreset === 'daily') Object.assign(next, { frequency: 'daily', interval: 1 })
-    if (nextPreset === 'weekdays') Object.assign(next, { frequency: 'weekly', interval: 1, byWeekdays: [1, 2, 3, 4, 5] })
-    if (nextPreset === 'weekends') Object.assign(next, { frequency: 'weekly', interval: 1, byWeekdays: [6, 7] })
-    if (nextPreset === 'weekly') Object.assign(next, { frequency: 'weekly', interval: 1, byWeekdays: [weekdayFor(start)] })
-    if (nextPreset === 'biweekly') Object.assign(next, { frequency: 'weekly', interval: 2, byWeekdays: [weekdayFor(start)] })
-    if (nextPreset === 'monthly') Object.assign(next, { frequency: 'monthly', interval: 1, byMonthDay: start.getDate() })
-    if (nextPreset === 'quarterly') Object.assign(next, { frequency: 'monthly', interval: 3, byMonthDay: start.getDate() })
-    if (nextPreset === 'semiannual') Object.assign(next, { frequency: 'monthly', interval: 6, byMonthDay: start.getDate() })
-    if (nextPreset === 'yearly') Object.assign(next, { frequency: 'yearly', interval: 1 })
-    if (nextPreset === 'custom') {
-      Object.assign(next, rule ?? {}, { anchorStart: startDate, durationMinutes: next.durationMinutes })
-    }
-    onChange(next)
-    setOpen(true)
-  }
-
-  const updateRule = (patch: Partial<RecurrenceRule>) => {
-    if (!rule) return
-    onChange({ ...rule, ...patch })
-  }
-
-  const changeFrequency = (frequency: RecurrenceFrequency) => {
-    const start = parseLocalDateTime(startDate)
-    updateRule({
-      frequency,
-      ...(frequency === 'weekly' ? { byWeekdays: rule?.byWeekdays?.length ? rule.byWeekdays : start ? [weekdayFor(start)] : [1] } : { byWeekdays: undefined }),
-      ...(frequency === 'monthly' ? { byMonthDay: rule?.byMonthDay ?? start?.getDate() ?? 1 } : { byMonthDay: undefined }),
+  const commitRule = (nextRule: RecurrenceRule, nextTime = time, baseOverride?: Date) => {
+    const base = baseOverride
+      ?? parseLocalDateTime(startDate)
+      ?? parseLocalDateTime(endDate)
+      ?? nextDefaultStart()
+    const nextStart = alignStart(nextRule, base, nextTime)
+    const duration = Math.max(0, rule?.durationMinutes ?? 0)
+    const nextEnd = new Date(nextStart.getTime() + duration * 60_000)
+    const normalized = withoutUndefined({
+      ...nextRule,
+      anchorStart: toLocalDateTime(nextStart),
+      durationMinutes: duration,
+      ...(nextRule.end.kind === 'until' && nextRule.end.date < toLocalDateTime(nextStart).slice(0, 10)
+        ? { end: { kind: 'until' as const, date: toLocalDateTime(nextStart).slice(0, 10) } }
+        : {}),
     })
+    onTimingChange(normalized.anchorStart, toLocalDateTime(nextEnd))
+    onChange(normalized)
   }
 
-  const toggleWeekday = (weekday: Weekday) => {
+  const enableRecurrence = () => {
+    if (rule) return
+    const base = parseLocalDateTime(startDate) ?? parseLocalDateTime(endDate) ?? nextDefaultStart()
+    const point = toLocalDateTime(base)
+    commitRule(createRecurrenceRule(point, point, 'daily'), timeFrom(point), base)
+  }
+
+  const changeFrequency = (frequency: Exclude<RecurrenceFrequency, 'hourly'>) => {
     if (!rule) return
-    const selected = new Set(rule.byWeekdays ?? [])
-    if (selected.has(weekday)) {
-      if (selected.size === 1) return
-      selected.delete(weekday)
-    } else selected.add(weekday)
-    updateRule({ byWeekdays: [...selected].sort() as Weekday[] })
+    const currentStart = parseLocalDateTime(startDate) ?? nextDefaultStart()
+    commitRule(withoutUndefined({
+      ...rule,
+      frequency,
+      interval: Math.max(1, rule.interval),
+      byWeekdays: frequency === 'weekly'
+        ? rule.byWeekdays?.length ? rule.byWeekdays : [weekdayFor(currentStart)]
+        : undefined,
+      byMonth: frequency === 'yearly' ? rule.byMonth ?? currentStart.getMonth() + 1 : undefined,
+      byMonthDay: frequency === 'monthly' || frequency === 'yearly'
+        ? rule.byMonthDay ?? currentStart.getDate()
+        : undefined,
+    }))
+  }
+
+  const toggleWeekdays = (weekdays: Weekday[]) => {
+    if (!rule || weekdays.length === 0) return
+    commitRule({ ...rule, byWeekdays: [...weekdays].sort() as Weekday[] })
   }
 
   return (
-    <fieldset className={`field-group recurrence-field ${compact ? 'is-compact' : ''}`}>
-      <legend><Repeat2 /> <span>重复设置 <small>可选</small></span></legend>
-      <button
-        type="button"
-        className={`recurrence-trigger ${rule ? 'is-active' : ''}`}
-        aria-expanded={open}
-        onClick={() => setOpen((shown) => !shown)}
+    <FormControl component="fieldset" fullWidth className="mui-recurrence-field">
+      <FieldLabel sx={{ mb: 1.5 }}>任务周期</FieldLabel>
+
+      <ToggleButtonGroup
+        exclusive
+        fullWidth
+        value={rule ? 'repeat' : 'once'}
+        onChange={(_, next) => {
+          if (next === 'repeat') enableRecurrence()
+          if (next === 'once') onChange(null)
+        }}
+        aria-label="选择任务是否重复"
+        sx={{ '& .MuiToggleButton-root': { flex: 1, justifyContent: 'flex-start', gap: 1, px: 1.5, py: 1 } }}
       >
-        <span className="recurrence-trigger-icon"><Repeat2 /></span>
-        <span><strong>{rule ? describeRecurrence(rule).split(' · ')[0] : '不重复'}</strong><small>{rule ? describeRecurrence(rule).split(' · ')[1] : '完成后不会生成下一次'}</small></span>
-        <ChevronDown />
-      </button>
+        <ToggleButton value="once" aria-label="不重复">
+          <CheckOutlined sx={{ fontSize: 17 }} />
+          <Box sx={{ display: 'grid', textAlign: 'left' }}><strong>不重复</strong><Typography variant="caption">默认，仅执行一次</Typography></Box>
+        </ToggleButton>
+        <ToggleButton value="repeat" aria-label="重复">
+          <RepeatOutlined sx={{ fontSize: 17 }} />
+          <Box sx={{ display: 'grid', textAlign: 'left' }}><strong>重复</strong><Typography variant="caption">按计划自动生成下一次</Typography></Box>
+        </ToggleButton>
+      </ToggleButtonGroup>
 
-      {open && (
-        <div className="recurrence-panel">
-          <label className="recurrence-preset-row">
-            <span>重复频率</span>
-            <select value={preset} onChange={(event) => choosePreset(event.target.value)}>
-              <option value="none">不重复</option>
-              <option value="daily">每天</option>
-              <option value="weekdays">每个工作日</option>
-              <option value="weekends">每个周末</option>
-              <option value="weekly">每周</option>
-              <option value="biweekly">每两周</option>
-              <option value="monthly">每月</option>
-              <option value="quarterly">每 3 个月</option>
-              <option value="semiannual">每 6 个月</option>
-              <option value="yearly">每年</option>
-              <option value="custom">自定</option>
-            </select>
-          </label>
+      {rule && (
+        <Paper
+          className="mui-recurrence-panel"
+          variant="outlined"
+          sx={{ mt: 2, p: 2, display: 'grid', gap: 2, borderColor: 'divider' }}
+        >
+          <ToggleButtonGroup
+            exclusive
+            fullWidth
+            size="small"
+            value={rule.frequency}
+            onChange={(_, frequency) => frequency && changeFrequency(frequency)}
+            aria-label="按什么周期重复"
+            sx={{ mb: 0.5 }}
+          >
+            {frequencyOptions.map((option) => <ToggleButton key={option.value} value={option.value}>{option.label}</ToggleButton>)}
+          </ToggleButtonGroup>
 
-          {rule && (
-            <>
-              <div className="recurrence-custom-grid">
-                <label>
-                  <span>周期</span>
-                  <select value={rule.frequency} onChange={(event) => changeFrequency(event.target.value as RecurrenceFrequency)}>
-                    <option value="daily">天</option>
-                    <option value="weekly">周</option>
-                    <option value="monthly">月</option>
-                    <option value="yearly">年</option>
-                  </select>
-                </label>
-                <label>
-                  <span>间隔</span>
-                  <span className="interval-control"><em>每</em><input type="number" min="1" max="999" value={rule.interval} onChange={(event) => updateRule({ interval: Math.max(1, Math.min(999, Number(event.target.value) || 1)) })} /><em>{rule.frequency === 'daily' ? '天' : rule.frequency === 'weekly' ? '周' : rule.frequency === 'monthly' ? '个月' : '年'}</em></span>
-                </label>
-              </div>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
+            <TextField
+              label="重复间隔"
+              type="number"
+              value={rule.interval}
+              onChange={(event) => commitRule({ ...rule, interval: Math.max(1, Math.min(999, Number(event.target.value) || 1)) })}
+              slotProps={{ htmlInput: { min: 1, max: 999, 'aria-label': '重复间隔' } }}
+              helperText={`每 ${rule.interval} ${rule.frequency === 'daily' ? '天' : rule.frequency === 'weekly' ? '周' : rule.frequency === 'monthly' ? '个月' : '年'}`}
+            />
+            <TimePicker
+              label="执行时间"
+              value={dayjs(`2000-01-01T${time}`)}
+              onChange={(value) => value?.isValid() && commitRule(rule, value.format('HH:mm'))}
+              timeSteps={{ minutes: 1 }}
+              slotProps={{ actionBar: { actions: ['cancel', 'accept'] } }}
+            />
+          </Box>
 
-              {rule.frequency === 'weekly' && (
-                <div className="weekday-picker" aria-label="选择重复星期">
-                  {weekdayOptions.map((day) => (
-                    <button key={day.value} type="button" aria-pressed={rule.byWeekdays?.includes(day.value)} className={rule.byWeekdays?.includes(day.value) ? 'is-active' : ''} onClick={() => toggleWeekday(day.value)}>{day.label}</button>
-                  ))}
-                </div>
-              )}
-
-              {rule.frequency === 'monthly' && (
-                <label className="recurrence-month-day">
-                  <span>每次在当月</span>
-                  <input type="number" min="1" max="31" value={rule.byMonthDay ?? 1} onChange={(event) => updateRule({ byMonthDay: Math.max(1, Math.min(31, Number(event.target.value) || 1)) })} />
-                  <span>日</span>
-                  <small>没有这一天的月份会自动跳过。</small>
-                </label>
-              )}
-
-              <div className="recurrence-end-row">
-                <label>
-                  <span>结束</span>
-                  <select value={rule.end.kind} onChange={(event) => updateRule({ end: event.target.value === 'never' ? { kind: 'never' } : { kind: 'until', date: startDate.slice(0, 10) } })}>
-                    <option value="never">永不结束</option>
-                    <option value="until">截止日期</option>
-                  </select>
-                </label>
-                {rule.end.kind === 'until' && <input aria-label="重复截止日期" type="date" min={startDate.slice(0, 10)} value={rule.end.date} onChange={(event) => updateRule({ end: { kind: 'until', date: event.target.value } })} />}
-              </div>
-
-              <div className="recurrence-preview" aria-live="polite">
-                <div><CalendarClock /><strong>接下来三次</strong></div>
-                {previews.length ? (
-                  <ol>{previews.map((item) => <li key={item.startDate}>{formatDateRange(item.startDate, item.endDate)}</li>)}</ol>
-                ) : <p>当前规则在截止日期前没有下一次。</p>}
-              </div>
-            </>
+          {rule.frequency === 'weekly' && (
+            <FormControl fullWidth>
+              <FieldLabel component="label" sx={{ mb: 0.75 }}>每周的哪几天</FieldLabel>
+              <ToggleButtonGroup
+                value={rule.byWeekdays ?? []}
+                onChange={(_, weekdays) => toggleWeekdays(weekdays)}
+                aria-label="选择重复星期"
+                fullWidth
+                sx={{ gap: 0.5, '& .MuiToggleButton-root': { flex: 1, minWidth: 0, px: 0.5 } }}
+              >
+                {weekdayOptions.map((day) => <ToggleButton key={day.value} value={day.value}>{day.label}</ToggleButton>)}
+              </ToggleButtonGroup>
+            </FormControl>
           )}
-          {message && <p className="recurrence-message" role="alert">{message}</p>}
-        </div>
+
+          {rule.frequency === 'monthly' && (
+            <TextField
+              label="每月日期"
+              type="number"
+              value={rule.byMonthDay ?? 1}
+              onChange={(event) => commitRule({ ...rule, byMonthDay: Math.max(1, Math.min(31, Number(event.target.value) || 1)) })}
+              helperText="当月没有这一天时，将跳过该月。"
+              slotProps={{ htmlInput: { min: 1, max: 31, 'aria-label': '每月日期' } }}
+            />
+          )}
+
+          {rule.frequency === 'yearly' && (
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
+              <TextField select label="每年月份" value={rule.byMonth ?? 1} onChange={(event) => commitRule({ ...rule, byMonth: Number(event.target.value) })} slotProps={{ htmlInput: { 'aria-label': '每年月份' } }}>
+                {Array.from({ length: 12 }, (_, index) => <MenuItem key={index + 1} value={index + 1}>{index + 1} 月</MenuItem>)}
+              </TextField>
+              <TextField
+                label="日期"
+                type="number"
+                value={rule.byMonthDay ?? 1}
+                onChange={(event) => commitRule({ ...rule, byMonthDay: Math.max(1, Math.min(31, Number(event.target.value) || 1)) })}
+                slotProps={{ htmlInput: { min: 1, max: 31, 'aria-label': '每年日期' } }}
+              />
+            </Box>
+          )}
+
+
+
+          <Box sx={{ display: 'grid', gridTemplateColumns: rule.end.kind === 'until' ? { xs: '1fr', sm: '1fr 1fr' } : '1fr', gap: 1.5 }}>
+            <TextField
+              select
+              label="重复结束"
+              value={rule.end.kind}
+              onChange={(event) => commitRule({
+                ...rule,
+                end: event.target.value === 'never' ? { kind: 'never' } : { kind: 'until', date: startDate.slice(0, 10) },
+              })}
+            >
+              <MenuItem value="never">永不结束</MenuItem>
+              <MenuItem value="until">截止日期</MenuItem>
+            </TextField>
+            {rule.end.kind === 'until' && (
+              <DatePicker
+                label="截止到"
+                value={rule.end.date ? dayjs(rule.end.date) : null}
+                minDate={startDate ? dayjs(startDate.slice(0, 10)) : undefined}
+                onChange={(value) => value?.isValid() && onChange({ ...rule, end: { kind: 'until', date: value.format('YYYY-MM-DD') } })}
+                slotProps={{ actionBar: { actions: ['cancel', 'accept'] } }}
+              />
+            )}
+          </Box>
+
+          <Paper sx={{ p: 1.5 }}>
+            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary' }}>{describeRecurrence(rule).split(' · ')[0]}，后续三次</Typography>
+            </Stack>
+            {previews.length ? (
+              <Box component="ol" sx={{ m: '8px 0 0 28px', p: 0, color: 'text.secondary', fontSize: 10, display: 'grid', gap: 0.5 }}>
+                {previews.map((item) => <li key={item.startDate}>{formatPreviewDate(item.startDate, item.endDate, rule.frequency === 'yearly')}</li>)}
+              </Box>
+            ) : <FormHelperText sx={{ ml: 0, mt: 1 }}>当前规则在截止日期前没有下一次。</FormHelperText>}
+          </Paper>
+        </Paper>
       )}
-    </fieldset>
+
+      {!rule && (
+        <Paper variant="outlined" sx={{ mt: 2, p: 2, display: 'grid', gap: 1.5, borderColor: 'divider' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
+            <DateTimePicker
+              label="开始时间"
+              value={startDate ? dayjs(startDate) : null}
+              onChange={(value) => onTimingChange(value?.isValid() ? value.format('YYYY-MM-DDTHH:mm') : '', endDate)}
+              timeSteps={{ minutes: 1 }}
+              slotProps={{ actionBar: { actions: ['clear', 'cancel', 'accept'] } }}
+            />
+            <DateTimePicker
+              label="结束时间"
+              value={endDate ? dayjs(endDate) : null}
+              onChange={(value) => onTimingChange(startDate, value?.isValid() ? value.format('YYYY-MM-DDTHH:mm') : '')}
+              timeSteps={{ minutes: 1 }}
+              slotProps={{ actionBar: { actions: ['clear', 'cancel', 'accept'] } }}
+            />
+          </Box>
+          <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between', gap: 0.5 }}>
+            <FormHelperText sx={{ m: 0 }}>开始和结束均可单独设置；都留空时仅显示在“全部”看板。</FormHelperText>
+            {(startDate || endDate) && <Button variant="text" onClick={() => onTimingChange('', '')}>清除时间</Button>}
+          </Stack>
+        </Paper>
+      )}
+    </FormControl>
   )
 }

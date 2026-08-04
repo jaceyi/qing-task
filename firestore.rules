@@ -24,12 +24,10 @@ service cloud.firestore {
           || (data.description is string && data.description.size() <= 2000))
         && data.startDate is string
         && data.endDate is string
-        && (
-          (data.startDate.size() == 0 && data.endDate.size() == 0)
-          ||
-          (data.startDate.size() >= 10 && data.startDate.size() <= 16
-            && data.endDate.size() >= 10 && data.endDate.size() <= 16)
-        )
+        && (data.startDate.size() == 0
+          || (data.startDate.size() >= 10 && data.startDate.size() <= 16))
+        && (data.endDate.size() == 0
+          || (data.endDate.size() >= 10 && data.endDate.size() <= 16))
         && data.type in ['single', 'progress']
         && data.targetCount is int
         && data.count is int
@@ -64,7 +62,7 @@ service cloud.firestore {
           && startDate.size() >= 10
           && endDate.size() >= 10
           && recurrence.keys().hasOnly([
-            'frequency', 'interval', 'byWeekdays', 'byMonthDay', 'end',
+            'frequency', 'interval', 'byWeekdays', 'byMonth', 'byMonthDay', 'end',
             'timeZone', 'anchorStart', 'durationMinutes'
           ])
           && recurrence.keys().hasAll([
@@ -82,6 +80,10 @@ service cloud.firestore {
             || (recurrence.byMonthDay is int
               && recurrence.byMonthDay >= 1
               && recurrence.byMonthDay <= 31))
+          && (!('byMonth' in recurrence)
+            || (recurrence.byMonth is int
+              && recurrence.byMonth >= 1
+              && recurrence.byMonth <= 12))
           && recurrence.end is map
           && recurrence.end.keys().hasOnly(['kind', 'date'])
           && recurrence.end.kind in ['never', 'until']
@@ -95,7 +97,7 @@ service cloud.firestore {
           && recurrence.anchorStart is string
           && recurrence.anchorStart.size() >= 10
           && recurrence.durationMinutes is int
-          && recurrence.durationMinutes >= 1
+          && recurrence.durationMinutes >= 0
         );
     }
 

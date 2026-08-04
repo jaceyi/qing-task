@@ -26,7 +26,7 @@ export function durationMinutes(startDate: string, endDate: string) {
   const start = parseLocalDateTime(startDate)
   const end = parseLocalDateTime(endDate)
   if (!start || !end) return 0
-  return Math.max(1, Math.round((end.getTime() - start.getTime()) / MINUTE))
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / MINUTE))
 }
 
 export function occurrenceKey(startDate: string) {
@@ -92,8 +92,8 @@ function afterThreshold(rule: RecurrenceRule, threshold: Date) {
     return null
   }
 
-  const month = anchor.getMonth()
-  const day = anchor.getDate()
+  const month = Math.max(1, Math.min(12, rule.byMonth ?? anchor.getMonth() + 1)) - 1
+  const day = Math.max(1, Math.min(31, rule.byMonthDay ?? anchor.getDate()))
   for (let step = interval; step < interval * 1000; step += interval) {
     const year = anchor.getFullYear() + step
     const candidate = new Date(year, month, day, hour, minute, 0, 0)
@@ -118,7 +118,7 @@ export function nextOccurrence(
   const threshold = new Date(Math.max(currentStart.getTime(), completedAt.getTime()))
   const nextStart = afterThreshold(rule, threshold)
   if (!nextStart || !withinEnd(rule, nextStart)) return null
-  const minutes = Math.max(1, rule.durationMinutes || durationMinutes(task.startDate, task.endDate))
+  const minutes = Math.max(0, rule.durationMinutes ?? durationMinutes(task.startDate, task.endDate))
   const nextEnd = new Date(nextStart.getTime() + minutes * MINUTE)
   return { startDate: toLocalDateTime(nextStart), endDate: toLocalDateTime(nextEnd) }
 }
@@ -160,7 +160,12 @@ export function describeRecurrence(rule: RecurrenceRule | null | undefined) {
     const day = rule.byMonthDay ?? parseLocalDateTime(rule.anchorStart)?.getDate()
     summary = `${interval === 1 ? '每月' : `每 ${interval} 个月`}${day ? `${day} 日` : ''}`
   }
-  if (rule.frequency === 'yearly') summary = interval === 1 ? '每年' : `每 ${interval} 年`
+  if (rule.frequency === 'yearly') {
+    const anchor = parseLocalDateTime(rule.anchorStart)
+    const month = rule.byMonth ?? (anchor ? anchor.getMonth() + 1 : undefined)
+    const day = rule.byMonthDay ?? anchor?.getDate()
+    summary = `${interval === 1 ? '每年' : `每 ${interval} 年`}${month && day ? `的 ${month} 月 ${day} 日` : ''}`
+  }
   return `${summary} · ${rule.end.kind === 'never' ? '永不结束' : `至 ${rule.end.date}`}`
 }
 
@@ -175,6 +180,7 @@ export function createRecurrenceRule(
     interval: 1,
     ...(frequency === 'weekly' ? { byWeekdays: [weekdayFor(start)] } : {}),
     ...(frequency === 'monthly' ? { byMonthDay: start.getDate() } : {}),
+    ...(frequency === 'yearly' ? { byMonth: start.getMonth() + 1, byMonthDay: start.getDate() } : {}),
     end: { kind: 'never' },
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
     anchorStart: startDate,
@@ -189,7 +195,7 @@ export function syncRecurrenceTiming(
 ) {
   if (!rule) return null
   const start = parseLocalDateTime(startDate)
-  return {
+  const normalized: RecurrenceRule = {
     ...rule,
     anchorStart: startDate,
     durationMinutes: durationMinutes(startDate, endDate),
@@ -197,5 +203,11 @@ export function syncRecurrenceTiming(
       ? { byWeekdays: [weekdayFor(start)] }
       : {}),
     ...(rule.frequency === 'monthly' && start ? { byMonthDay: rule.byMonthDay ?? start.getDate() } : {}),
+    ...(rule.frequency === 'yearly' && start
+      ? { byMonth: rule.byMonth ?? start.getMonth() + 1, byMonthDay: rule.byMonthDay ?? start.getDate() }
+      : {}),
   }
+  return Object.fromEntries(
+    Object.entries(normalized).filter(([, value]) => value !== undefined),
+  ) as unknown as RecurrenceRule
 }

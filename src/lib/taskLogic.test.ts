@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  completedOccurrenceSnapshot,
   filterAndSortTasks,
   isTaskComplete,
   normalizeTaskDraft,
@@ -27,6 +28,33 @@ describe('任务状态逻辑', () => {
     expect(isTaskComplete({ ...baseTask, count: 5 })).toBe(true)
     expect(isTaskComplete({ ...baseTask, type: 'single', completed: true })).toBe(true)
     expect(isTaskComplete({ ...baseTask, type: 'single', completed: false })).toBe(false)
+  })
+
+  it('把完成的一期复制成无重复属性的历史任务', () => {
+    const recurrence = {
+      frequency: 'daily' as const,
+      interval: 1,
+      end: { kind: 'never' as const },
+      timeZone: 'Asia/Shanghai',
+      anchorStart: '2026-07-28T09:00',
+      durationMinutes: 0,
+    }
+    const completedAt = new Date('2026-07-28T09:30:00')
+    expect(completedOccurrenceSnapshot({
+      ...baseTask,
+      recurrence,
+      seriesState: 'active',
+      currentOccurrenceKey: '20260728T0900',
+      occurrenceSequence: 3,
+    }, completedAt)).toMatchObject({
+      title: baseTask.title,
+      count: baseTask.targetCount,
+      recurrence: null,
+      seriesState: null,
+      currentOccurrenceKey: null,
+      occurrenceSequence: 0,
+      createdAt: completedAt,
+    })
   })
 
   it('将完成任务排在未完成任务之后', () => {

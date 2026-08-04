@@ -2,9 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { demoTags, demoTasks } from '../data/demo'
 import { nextOccurrence, occurrenceKey } from '../lib/recurrence'
 import { cleanTagName, normalizeTagName, sortTags } from '../lib/tagLogic'
-import { normalizeTaskDraft, switchedTaskValues, updatedTaskInfo } from '../lib/taskLogic'
+import {
+  completedOccurrenceSnapshot,
+  completedOccurrenceTaskId,
+  normalizeTaskDraft,
+  switchedTaskValues,
+  updatedTaskInfo,
+} from '../lib/taskLogic'
 import {
   adjustTaskProgress,
+  deleteTaskLogs,
+  migrateProgressLogsToCompletedInstance,
+  resetTaskProgress,
+  restoreTaskProgress,
   changeTaskType,
   createTag as createRemoteTag,
   createTask as createRemoteTask,
@@ -47,7 +57,11 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null)
   const tasksRef = useRef(tasks)
   const tagsRef = useRef(tags)
-  const lastAdvanceRef = useRef<{ previous: Task; expiresAt: number } | null>(null)
+  const lastStatusActionRef = useRef<{
+    previous: Task
+    kind: 'single' | 'progress' | 'recurrence-completed' | 'recurrence-skipped'
+    expiresAt: number
+  } | null>(null)
 
   const replaceTasks = useCallback((next: Task[] | ((current: Task[]) => Task[])) => {
     const resolved = typeof next === 'function' ? next(tasksRef.current) : next
@@ -201,22 +215,27 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
       if (completed && current.recurrence && current.seriesState !== 'ended') {
         const completedAt = new Date()
         const next = nextOccurrence(current, completedAt)
-        lastAdvanceRef.current = { previous: { ...current }, expiresAt: Date.now() + 10_000 }
-        replaceTasks((tasks) => tasks.map((task) => task.id === taskId
-          ? next
-            ? {
-                ...task,
-                ...next,
-                count: 0,
-                completed: false,
-                seriesState: 'active',
-                currentOccurrenceKey: occurrenceKey(next.startDate),
-                occurrenceSequence: (task.occurrenceSequence ?? 1) + 1,
-                updatedAt: completedAt,
-              }
-            : { ...task, completed: true, seriesState: 'ended', updatedAt: completedAt }
-          : task))
+        lastStatusActionRef.current = { previous: { ...current }, kind: 'recurrence-completed', expiresAt: Date.now() + 10_000 }
+        replaceTasks((tasks) => tasks.flatMap((task) => {
+          if (task.id !== taskId) return task
+          const completedSnapshot = completedOccurrenceSnapshot(task, completedAt)
+          if (!next) return { ...completedSnapshot, id: task.id }
+          return [
+            {
+              ...task,
+              ...next,
+              count: 0,
+              completed: false,
+              seriesState: 'active',
+              currentOccurrenceKey: occurrenceKey(next.startDate),
+              occurrenceSequence: (task.occurrenceSequence ?? 1) + 1,
+              updatedAt: completedAt,
+            },
+            completedSnapshot,
+          ]
+        }))
       } else {
+        lastStatusActionRef.current = { previous: { ...current }, kind: 'single', expiresAt: Date.now() + 10_000 }
         replaceTasks((tasks) =>
           tasks.map((task) =>
             task.id === taskId ? { ...task, completed, ...(task.recurrence && !completed ? { seriesState: 'active' as const } : {}), updatedAt: new Date() } : task,
@@ -237,25 +256,38 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
       const count = Math.max(0, Math.min(current.targetCount, current.count + delta))
       if (count === current.count) return false
       const mutation = demoMode ? null : adjustTaskProgress(userId!, current, delta)
+      if (mutation && delta > 0 && count === current.targetCount && current.recurrence && current.seriesState !== 'ended') {
+        // 完成后把本周期内的“进度 ±1”日志迁移到实例任务下，主任务保持干净。
+        const key = current.currentOccurrenceKey || occurrenceKey(current.startDate)
+        const instanceTaskId = completedOccurrenceTaskId(current.id, key)
+        void mutation.committed
+          .then(() => migrateProgressLogsToCompletedInstance(userId!, current.id, instanceTaskId))
+          .catch((reason) => setError(reason instanceof Error ? reason.message : '迁移变更记录失败'))
+      }
       if (delta > 0 && count === current.targetCount && current.recurrence && current.seriesState !== 'ended') {
         const completedAt = new Date()
         const next = nextOccurrence(current, completedAt)
-        lastAdvanceRef.current = { previous: { ...current }, expiresAt: Date.now() + 10_000 }
-        replaceTasks((tasks) => tasks.map((task) => task.id === taskId
-          ? next
-            ? {
-                ...task,
-                ...next,
-                count: 0,
-                completed: false,
-                seriesState: 'active',
-                currentOccurrenceKey: occurrenceKey(next.startDate),
-                occurrenceSequence: (task.occurrenceSequence ?? 1) + 1,
-                updatedAt: completedAt,
-              }
-            : { ...task, count: task.targetCount, seriesState: 'ended', updatedAt: completedAt }
-          : task))
+        lastStatusActionRef.current = { previous: { ...current }, kind: 'recurrence-completed', expiresAt: Date.now() + 10_000 }
+        replaceTasks((tasks) => tasks.flatMap((task) => {
+          if (task.id !== taskId) return task
+          const completedSnapshot = completedOccurrenceSnapshot(task, completedAt)
+          if (!next) return { ...completedSnapshot, id: task.id }
+          return [
+            {
+              ...task,
+              ...next,
+              count: 0,
+              completed: false,
+              seriesState: 'active',
+              currentOccurrenceKey: occurrenceKey(next.startDate),
+              occurrenceSequence: (task.occurrenceSequence ?? 1) + 1,
+              updatedAt: completedAt,
+            },
+            completedSnapshot,
+          ]
+        }))
       } else {
+        lastStatusActionRef.current = { previous: { ...current }, kind: 'progress', expiresAt: Date.now() + 10_000 }
         replaceTasks((tasks) =>
           tasks.map((task) =>
             task.id === taskId ? { ...task, count, updatedAt: new Date() } : task,
@@ -268,13 +300,32 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
     [demoMode, monitorCommit, replaceTasks, userId],
   )
 
+  /** 一键将进度清零；会写入可撤销的状态动作，防误触。 */
+  const resetProgress = useCallback(
+    async (taskId: string) => {
+      if (!demoMode && !userId) throw new Error('请先登录')
+      const current = tasksRef.current.find((task) => task.id === taskId)
+      if (!current || current.type !== 'progress' || current.count <= 0) return false
+      const mutation = demoMode ? null : resetTaskProgress(userId!, current)
+      lastStatusActionRef.current = { previous: { ...current }, kind: 'progress', expiresAt: Date.now() + 10_000 }
+      replaceTasks((tasks) =>
+        tasks.map((task) =>
+          task.id === taskId ? { ...task, count: 0, updatedAt: new Date() } : task,
+        ),
+      )
+      if (mutation) monitorCommit(mutation.committed, '重置进度')
+      return true
+    },
+    [demoMode, monitorCommit, replaceTasks, userId],
+  )
+
   const skipOccurrence = useCallback(async (taskId: string) => {
     if (!demoMode && !userId) throw new Error('请先登录')
     const current = tasksRef.current.find((task) => task.id === taskId)
     if (!current?.recurrence || current.seriesState === 'ended') return false
     const mutation = demoMode ? null : skipRecurringOccurrence(userId!, current)
     const next = nextOccurrence(current, new Date())
-    lastAdvanceRef.current = { previous: { ...current }, expiresAt: Date.now() + 10_000 }
+    lastStatusActionRef.current = { previous: { ...current }, kind: 'recurrence-skipped', expiresAt: Date.now() + 10_000 }
     replaceTasks((tasks) => tasks.map((task) => task.id === taskId
       ? next
         ? {
@@ -292,25 +343,67 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
     return true
   }, [demoMode, monitorCommit, replaceTasks, userId])
 
-  const undoLastAdvance = useCallback(async () => {
-    const advance = lastAdvanceRef.current
-    if (!advance || advance.expiresAt < Date.now()) return false
-    const current = tasksRef.current.find((task) => task.id === advance.previous.id)
+  const undoLastTaskAction = useCallback(async () => {
+    const action = lastStatusActionRef.current
+    if (!action || action.expiresAt < Date.now()) return false
+    const current = tasksRef.current.find((task) => task.id === action.previous.id)
     if (!current) return false
-    const untouched = current.title === advance.previous.title
-      && current.description === advance.previous.description
-      && current.type === advance.previous.type
-      && current.targetCount === advance.previous.targetCount
-      && JSON.stringify(current.tagIds ?? []) === JSON.stringify(advance.previous.tagIds ?? [])
-      && JSON.stringify(current.recurrence ?? null) === JSON.stringify(advance.previous.recurrence ?? null)
-      && (current.seriesState === 'ended' || current.currentOccurrenceKey !== advance.previous.currentOccurrenceKey)
+    const sameStaticFields = current.title === action.previous.title
+      && current.description === action.previous.description
+      && current.type === action.previous.type
+      && current.targetCount === action.previous.targetCount
+      && JSON.stringify(current.tagIds ?? []) === JSON.stringify(action.previous.tagIds ?? [])
+
+    if (action.kind === 'single' || action.kind === 'progress') {
+      const sameSchedule = current.startDate === action.previous.startDate
+        && current.endDate === action.previous.endDate
+        && JSON.stringify(current.recurrence ?? null) === JSON.stringify(action.previous.recurrence ?? null)
+      const statusChanged = action.kind === 'single'
+        ? current.completed !== action.previous.completed
+        : current.count !== action.previous.count
+      if (!sameStaticFields || !sameSchedule || !statusChanged) return false
+      const progressDelta = action.previous.count - current.count
+      const mutation = demoMode
+        ? null
+        : action.kind === 'single'
+          ? setSingleCompletion(userId!, current, action.previous.completed)
+          : progressDelta === 1 || progressDelta === -1
+            ? adjustTaskProgress(userId!, current, progressDelta > 0 ? 1 : -1)
+            // 进度重置的撤销需要按绝对值恢复
+            : restoreTaskProgress(userId!, current, action.previous.count)
+      replaceTasks((tasks) => tasks.map((task) => task.id === action.previous.id
+        ? { ...action.previous, updatedAt: new Date() }
+        : task))
+      lastStatusActionRef.current = null
+      if (mutation) monitorCommit(mutation.committed, '撤销任务状态变更')
+      return true
+    }
+
+    const activeSeriesAdvanced = JSON.stringify(current.recurrence ?? null) === JSON.stringify(action.previous.recurrence ?? null)
+      && (current.seriesState === 'ended' || current.currentOccurrenceKey !== action.previous.currentOccurrenceKey)
       && (current.seriesState === 'ended' || (current.type === 'single' ? !current.completed : current.count === 0))
+    const terminalCompletion = action.kind === 'recurrence-completed'
+      && !current.recurrence
+      && (current.type === 'single' ? current.completed : current.count === current.targetCount)
+    const untouched = sameStaticFields && (activeSeriesAdvanced || terminalCompletion)
     if (!untouched) return false
-    const mutation = demoMode ? null : undoRecurringAdvance(userId!, current, advance.previous)
-    replaceTasks((tasks) => tasks.map((task) => task.id === advance.previous.id
-      ? { ...advance.previous, updatedAt: new Date() }
-      : task))
-    lastAdvanceRef.current = null
+    const mutation = demoMode ? null : undoRecurringAdvance(userId!, current, action.previous)
+    const completedTaskId = completedOccurrenceTaskId(
+      action.previous.id,
+      action.previous.currentOccurrenceKey ?? occurrenceKey(action.previous.startDate),
+    )
+    if (mutation && action.kind === 'recurrence-completed') {
+      // 后悔撤销时一并清掉实例任务的日志，避免 Firestore 里留下孤儿日志。
+      void mutation.committed
+        .then(() => deleteTaskLogs(userId!, completedTaskId))
+        .catch(() => undefined)
+    }
+    replaceTasks((tasks) => tasks
+      .filter((task) => action.kind !== 'recurrence-completed' || task.id !== completedTaskId)
+      .map((task) => task.id === action.previous.id
+        ? { ...action.previous, updatedAt: new Date() }
+        : task))
+    lastStatusActionRef.current = null
     if (mutation) monitorCommit(mutation.committed, '撤销完成本次')
     return true
   }, [demoMode, monitorCommit, replaceTasks, userId])
@@ -425,8 +518,10 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
       changeType,
       setCompleted,
       adjustProgress,
+      resetProgress,
       skipOccurrence,
-      undoLastAdvance,
+      undoLastAdvance: undoLastTaskAction,
+      undoLastTaskAction,
       deleteTask,
       createTag,
       updateTag,
@@ -446,10 +541,11 @@ export function useTaskData(userId: string | null, demoMode: boolean) {
       loading,
       mergeTags,
       preferences,
+      resetProgress,
       setCompleted,
       skipOccurrence,
       tags,
-      undoLastAdvance,
+      undoLastTaskAction,
       updateTag,
       updatePreferences,
       syncState,

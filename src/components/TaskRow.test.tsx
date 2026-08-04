@@ -64,6 +64,33 @@ describe('任务行手势', () => {
     expect(within(container).getByRole('button', { name: '完成任务：测试普通任务' })).toBeInTheDocument()
   })
 
+  it('普通任务完成与取消完成都交给可撤销提示处理', async () => {
+    const onUndoableStatusChange = vi.fn()
+    const { container, rerender } = render(
+      <TaskRow
+        task={singleTask}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => true)}
+        onNotify={vi.fn()}
+        onUndoableStatusChange={onUndoableStatusChange}
+      />,
+    )
+    fireEvent.click(within(container).getByRole('button', { name: '完成任务：测试普通任务' }))
+    await waitFor(() => expect(onUndoableStatusChange).toHaveBeenCalledWith('任务已完成'))
+
+    rerender(
+      <TaskRow
+        task={{ ...singleTask, completed: true }}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => true)}
+        onNotify={vi.fn()}
+        onUndoableStatusChange={onUndoableStatusChange}
+      />,
+    )
+    fireEvent.click(within(container).getByRole('button', { name: '撤销完成：测试普通任务' }))
+    await waitFor(() => expect(onUndoableStatusChange).toHaveBeenCalledWith('已取消完成'))
+  })
+
   it('无时间任务使用清晰的无时间标识', () => {
     const { container } = render(
       <TaskRow
@@ -75,7 +102,7 @@ describe('任务行手势', () => {
     )
 
     expect(container.querySelector('.task-date')).toHaveTextContent('无时间')
-    expect(container.querySelector('.task-date .lucide-calendar-off')).toBeInTheDocument()
+    expect(container.querySelector('.task-date [data-testid="CalendarTodayOutlinedIcon"]')).toBeInTheDocument()
   })
 
   it('向右拖动时只显示浅绿色完成底层', () => {
@@ -94,8 +121,8 @@ describe('任务行手势', () => {
 
     expect(container.querySelector('.task-row-wrap')).toHaveClass('is-swiping-positive')
     expect(container.querySelector('.task-row-wrap')).not.toHaveClass('is-swiping-negative')
-    expect(container.querySelector('.lucide-arrow-right')).not.toBeInTheDocument()
-    expect(container.querySelector('.lucide-arrow-left')).not.toBeInTheDocument()
+    expect(container.querySelector('[data-testid="ArrowForwardOutlinedIcon"]')).not.toBeInTheDocument()
+    expect(container.querySelector('[data-testid="ArrowBackOutlinedIcon"]')).not.toBeInTheDocument()
   })
 
   it('使用统一的双字拖拽动作和正负图标', () => {
@@ -109,9 +136,9 @@ describe('任务行手势', () => {
     )
 
     expect(container.querySelector('.swipe-underlay-positive')).toHaveTextContent('推进')
-    expect(container.querySelector('.swipe-underlay-positive .lucide-check')).toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-positive [data-testid="CheckOutlinedIcon"]')).toBeInTheDocument()
     expect(container.querySelector('.swipe-underlay-negative')).toHaveTextContent('回退')
-    expect(container.querySelector('.swipe-underlay-negative .lucide-x')).toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-negative [data-testid="CloseOutlinedIcon"]')).toBeInTheDocument()
 
     rerender(
       <TaskRow
@@ -122,10 +149,10 @@ describe('任务行手势', () => {
       />,
     )
     expect(container.querySelector('.swipe-underlay-positive')).toHaveTextContent('完成')
-    expect(container.querySelector('.swipe-underlay-positive .lucide-check')).toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-positive [data-testid="CheckOutlinedIcon"]')).toBeInTheDocument()
     expect(container.querySelector('.swipe-underlay-negative')).toHaveTextContent('取消')
-    expect(container.querySelector('.swipe-underlay-negative .lucide-x')).toBeInTheDocument()
-    expect(container.querySelector('.swipe-underlay-negative .lucide-check')).not.toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-negative [data-testid="CloseOutlinedIcon"]')).toBeInTheDocument()
+    expect(container.querySelector('.swipe-underlay-negative [data-testid="CheckOutlinedIcon"]')).not.toBeInTheDocument()
   })
 
   it('点击进度环推进一次，且不会打开详情', async () => {
@@ -150,17 +177,37 @@ describe('任务行手势', () => {
     expect(onOpen).not.toHaveBeenCalled()
   })
 
-  it('进度达到目标后圆环不可继续增加', () => {
+  it('回退进度后使用统一提示文案', async () => {
+    const onNotify = vi.fn()
+    const { container } = render(
+      <TaskRow
+        task={progressTask}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => true)}
+        onNotify={onNotify}
+      />,
+    )
+
+    fireEvent.click(within(container).getByRole('button', { name: '进度减一' }))
+    await waitFor(() => expect(onNotify).toHaveBeenCalledWith('已回退进度'))
+  })
+
+  it('进度达到目标后点击圆环可重置为 0', async () => {
+    const onResetProgress = vi.fn(async () => true)
     const { container } = render(
       <TaskRow
         task={{ ...progressTask, count: 5 }}
         onOpen={vi.fn()}
         onAction={vi.fn(async () => true)}
+        onResetProgress={onResetProgress}
         onNotify={vi.fn()}
       />,
     )
 
-    expect(within(container).getByRole('button', { name: '进度已完成：测试进度任务' })).toBeDisabled()
+    const button = within(container).getByRole('button', { name: '重置进度：测试进度任务' })
+    expect(button).not.toBeDisabled()
+    fireEvent.click(button)
+    await waitFor(() => expect(onResetProgress).toHaveBeenCalledTimes(1))
   })
 
   it('将进度操作放在进度展示之前，让状态列固定在最右侧', () => {

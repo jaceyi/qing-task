@@ -4,6 +4,7 @@ import {
   describeRecurrence,
   nextOccurrence,
   previewRecurrence,
+  syncRecurrenceTiming,
 } from './recurrence'
 import type { Weekday } from '../types'
 
@@ -50,5 +51,32 @@ describe('recurrence', () => {
       byWeekdays: [1, 3] as Weekday[],
     }
     expect(describeRecurrence(recurrence)).toBe('每 2 周的周一、周三 · 永不结束')
+  })
+
+  it('supports an explicit month and day for yearly schedules', () => {
+    const recurrence = {
+      ...createRecurrenceRule('2026-08-03T09:00', '2026-08-03T09:00', 'yearly'),
+      interval: 2,
+      byMonth: 12,
+      byMonthDay: 18,
+    }
+    expect(nextOccurrence(
+      { startDate: '2026-08-03T09:00', endDate: '2026-08-03T09:00', recurrence },
+      new Date('2026-08-03T09:00:00'),
+    )).toEqual({ startDate: '2028-12-18T09:00', endDate: '2028-12-18T09:00' })
+    expect(describeRecurrence(recurrence)).toBe('每 2 年的 12 月 18 日 · 永不结束')
+  })
+
+  it('removes undefined frequency fields before persisting', () => {
+    const recurrence = {
+      ...createRecurrenceRule('2026-08-03T09:00', '2026-08-03T09:00', 'daily'),
+      byWeekdays: undefined,
+      byMonth: undefined,
+      byMonthDay: undefined,
+    }
+    expect(syncRecurrenceTiming(recurrence, recurrence.anchorStart, recurrence.anchorStart)).toEqual(
+      expect.not.objectContaining({ byWeekdays: undefined, byMonth: undefined, byMonthDay: undefined }),
+    )
+    expect(Object.values(syncRecurrenceTiming(recurrence, recurrence.anchorStart, recurrence.anchorStart)!)).not.toContain(undefined)
   })
 })

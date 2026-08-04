@@ -114,6 +114,47 @@ describe('本地优先任务状态', () => {
     await waitFor(() => expect(result.current.syncState.pendingWrites).toBe(false))
   })
 
+  it('普通任务的完成和取消完成都可以恢复到操作前状态', async () => {
+    const { result } = renderHook(() => useTaskData('user-1', false))
+    act(() => serviceState.onTasks?.([singleTask], { fromCache: false, pendingWrites: false }))
+
+    await act(async () => {
+      expect(await result.current.setCompleted(singleTask.id, true)).toBe(true)
+      expect(await result.current.undoLastTaskAction()).toBe(true)
+    })
+    expect(result.current.tasks[0].completed).toBe(false)
+
+    const completedTask = { ...singleTask, completed: true }
+    act(() => serviceState.onTasks?.([completedTask], { fromCache: false, pendingWrites: false }))
+    await act(async () => {
+      expect(await result.current.setCompleted(singleTask.id, false)).toBe(true)
+      expect(await result.current.undoLastTaskAction()).toBe(true)
+    })
+    expect(result.current.tasks[0].completed).toBe(true)
+    expect(serviceState.completionCalls.map(({ completed }) => completed)).toEqual([true, false, false, true])
+  })
+
+  it('进度任务到达目标和取消完成都可以撤销', async () => {
+    const { result } = renderHook(() => useTaskData('user-1', false))
+    const nearlyComplete = { ...progressTask, count: 4 }
+    act(() => serviceState.onTasks?.([nearlyComplete], { fromCache: false, pendingWrites: false }))
+
+    await act(async () => {
+      expect(await result.current.adjustProgress(progressTask.id, 1)).toBe(true)
+      expect(await result.current.undoLastTaskAction()).toBe(true)
+    })
+    expect(result.current.tasks[0].count).toBe(4)
+
+    const completedTask = { ...progressTask, count: 5 }
+    act(() => serviceState.onTasks?.([completedTask], { fromCache: false, pendingWrites: false }))
+    await act(async () => {
+      expect(await result.current.adjustProgress(progressTask.id, -1)).toBe(true)
+      expect(await result.current.undoLastTaskAction()).toBe(true)
+    })
+    expect(result.current.tasks[0].count).toBe(5)
+    expect(serviceState.progressCalls.map(({ delta }) => delta)).toEqual([1, -1, -1, 1])
+  })
+
   it('切换账号后等待新账号首轮任务快照，避免把详情误判为不存在', () => {
     const { result, rerender } = renderHook(
       ({ userId }: { userId: string | null }) => useTaskData(userId, false),
@@ -154,7 +195,7 @@ describe('本地优先任务状态', () => {
     expect(result.current.syncState.pendingWrites).toBe(false)
   })
 
-  it('完成重复任务后滚动到下一次，并可在短时间内撤销', async () => {
+  it('完成重复任务后保留无重复的完成副本、滚动原系列，并可在短时间内撤销', async () => {
     const recurringTask: Task = {
       ...singleTask,
       id: 'recurring-1',
@@ -174,10 +215,21 @@ describe('本地优先任务状态', () => {
     expect(result.current.tasks[0].completed).toBe(false)
     expect(result.current.tasks[0].startDate).not.toBe(recurringTask.startDate)
     expect(result.current.tasks[0].occurrenceSequence).toBe(2)
+    expect(result.current.tasks).toHaveLength(2)
+    expect(result.current.tasks[1]).toMatchObject({
+      title: recurringTask.title,
+      description: recurringTask.description,
+      startDate: recurringTask.startDate,
+      endDate: recurringTask.endDate,
+      completed: true,
+      recurrence: null,
+      seriesState: null,
+    })
 
     await act(async () => {
       expect(await result.current.undoLastAdvance()).toBe(true)
     })
+    expect(result.current.tasks).toHaveLength(1)
     expect(result.current.tasks[0].startDate).toBe(recurringTask.startDate)
     expect(result.current.tasks[0].occurrenceSequence).toBe(1)
   })

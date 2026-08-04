@@ -15,6 +15,7 @@ export interface RecurrenceRule {
   frequency: RecurrenceFrequency
   interval: number
   byWeekdays?: Weekday[]
+  byMonth?: number
   byMonthDay?: number
   end: { kind: 'never' } | { kind: 'until'; date: string }
   timeZone: string

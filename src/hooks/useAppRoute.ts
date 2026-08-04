@@ -1,77 +1,77 @@
-import { useCallback, useEffect, useState } from 'react'
-import { parseAppRoute, pathForRoute, type AppRoute } from '../lib/routes'
-import type { BoardScope } from '../types'
-
-type TopLevelRoute = Extract<AppRoute, { name: 'board' | 'tag-board' | 'settings' }>
+import { useCallback, useEffect, useMemo } from 'react'
+import { useLocation, useNavigate } from 'react-router'
+import {
+  DEFAULT_BOARD_ROUTE,
+  getRouteHistoryMode,
+  parseAppRoute,
+  pathForRoute,
+  type AppRoute,
+  type BoardRoute,
+  type RouteHistoryMode,
+} from '../lib/routes'
 
 interface RouteState {
   appRoute?: boolean
-  fromScope?: BoardScope
+  backRoute?: BoardRoute
 }
 
-function currentRoute() {
-  return parseAppRoute(window.location.pathname, window.location.search)
+interface AppNavigateOptions {
+  mode?: RouteHistoryMode
+  backRoute?: BoardRoute
 }
 
-function urlWithDevelopmentFlags(path: string) {
+function urlWithDevelopmentFlags(path: string, currentSearch: string) {
   const next = new URL(path, window.location.origin)
-  const current = new URL(window.location.href)
-  if (current.searchParams.has('demo')) next.searchParams.set('demo', '1')
+  const current = new URLSearchParams(currentSearch)
+  if (current.has('demo')) next.searchParams.set('demo', '1')
   return `${next.pathname}${next.search}`
 }
 
 export function useAppRoute() {
-  const [route, setRoute] = useState<AppRoute>(currentRoute)
+  const location = useLocation()
+  const routerNavigate = useNavigate()
+  const route = useMemo(
+    () => parseAppRoute(location.pathname, location.search),
+    [location.pathname, location.search],
+  )
+  const routeState = (location.state ?? {}) as RouteState
 
   useEffect(() => {
-    const handlePopState = () => setRoute(currentRoute())
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-  }, [])
-
-  useEffect(() => {
-    if (window.location.pathname !== '/') return
-    const canonical = urlWithDevelopmentFlags(pathForRoute({ name: 'board', scope: 'all' }))
-    window.history.replaceState({ appRoute: true, fromScope: 'all' }, '', canonical)
-  }, [])
+    const canonical = urlWithDevelopmentFlags(pathForRoute(route), location.search)
+    if (`${location.pathname}${location.search}` === canonical) return
+    routerNavigate(canonical, { replace: true, state: location.state })
+  }, [location.pathname, location.search, location.state, route, routerNavigate])
 
   const navigate = useCallback(
-    (next: AppRoute, options: { replace?: boolean; fromScope?: BoardScope } = {}) => {
-      const url = urlWithDevelopmentFlags(pathForRoute(next))
-      const state: RouteState = { appRoute: true, fromScope: options.fromScope }
-      if (options.replace) window.history.replaceState(state, '', url)
-      else window.history.pushState(state, '', url)
-      setRoute(next)
+    (next: AppRoute, options: AppNavigateOptions = {}) => {
+      const url = urlWithDevelopmentFlags(pathForRoute(next), location.search)
+      const state: RouteState = { appRoute: true, backRoute: options.backRoute }
+      routerNavigate(url, {
+        replace: (options.mode ?? getRouteHistoryMode(next)) === 'replace',
+        state,
+      })
       window.scrollTo({ top: 0, behavior: 'smooth' })
     },
-    [],
-  )
-
-  const navigateTopLevel = useCallback(
-    (next: TopLevelRoute, options: { fromScope?: BoardScope } = {}) => {
-      navigate(next, { ...options, replace: true })
-    },
-    [navigate],
+    [location.search, routerNavigate],
   )
 
   const goBackToBoard = useCallback(
-    (fallbackScope: BoardScope) => {
-      const state = window.history.state as RouteState | null
-      if (state?.appRoute && window.history.length > 1) {
-        window.history.back()
+    (fallback: BoardRoute = DEFAULT_BOARD_ROUTE) => {
+      if (routeState.appRoute && routeState.backRoute) {
+        routerNavigate(-1)
         return
       }
-      navigate({ name: 'board', scope: state?.fromScope ?? fallbackScope }, { replace: true })
+      navigate(routeState.backRoute ?? fallback, { mode: 'replace' })
     },
-    [navigate],
+    [navigate, routeState.appRoute, routeState.backRoute, routerNavigate],
   )
 
-  const state = window.history.state as RouteState | null
   return {
     route,
     navigate,
-    navigateTopLevel,
     goBackToBoard,
-    fromScope: state?.fromScope ?? 'all',
+    backRoute: routeState.backRoute ?? DEFAULT_BOARD_ROUTE,
   }
 }
+
+export type AppRouter = ReturnType<typeof useAppRoute>

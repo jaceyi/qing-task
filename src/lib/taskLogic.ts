@@ -7,6 +7,26 @@ export function isTaskComplete(task: Pick<Task, 'type' | 'completed' | 'count' |
   return task.type === 'single' ? task.completed : task.count === task.targetCount
 }
 
+export function completedOccurrenceTaskId(taskId: string, key: string) {
+  return `completed-${taskId}-${key}`
+}
+
+export function completedOccurrenceSnapshot(task: Task, completedAt = new Date()): Task {
+  return {
+    ...task,
+    id: completedOccurrenceTaskId(task.id, task.currentOccurrenceKey ?? task.startDate.replace(/[^0-9]/g, '')),
+    count: task.type === 'progress' ? task.targetCount : 0,
+    completed: task.type === 'single',
+    recurrence: null,
+    seriesState: null,
+    currentOccurrenceKey: null,
+    occurrenceSequence: 0,
+    lastAdvanceMutationId: null,
+    createdAt: completedAt,
+    updatedAt: completedAt,
+  }
+}
+
 export function filterAndSortTasks(
   tasks: Task[],
   scope: TimeFilterScope,

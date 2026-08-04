@@ -22,7 +22,7 @@
 
 ## 本地运行
 
-需要 Node.js 22 或更新版本。
+需要 Node.js 22.22.0 或更新版本（React Router 8 的最低要求；项目已提供 `.nvmrc`）。
 
 ```bash
 npm install

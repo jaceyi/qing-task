@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { Plus, Tags, X } from 'lucide-react'
+import { useState } from 'react'
+import { Alert, Autocomplete, Box, Chip, FormHelperText, TextField } from '@mui/material'
 import { cleanTagName, normalizeTagName } from '../lib/tagLogic'
 import type { Tag } from '../types'
 
@@ -12,49 +12,33 @@ interface TagPickerProps {
 }
 
 export function TagPicker({ tags, selectedTagIds, onChange, onCreateTag, compact = false }: TagPickerProps) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState('')
+  const [inputValue, setInputValue] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
-  const rootRef = useRef<HTMLFieldSetElement>(null)
   const selected = selectedTagIds ?? []
-  const selectedSet = new Set(selected)
-  const selectedTags = tags.filter((tag) => selectedSet.has(tag.id))
-  const normalizedSearch = normalizeTagName(search)
-  const matches = tags.filter((tag) => !selectedSet.has(tag.id) && (!normalizedSearch || tag.normalizedName.includes(normalizedSearch)))
-  const exact = tags.some((tag) => tag.normalizedName === normalizedSearch)
+  const selectedTags = tags.filter((tag) => selected.includes(tag.id))
 
-  useEffect(() => {
-    if (!open) return
-    const onOutside = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+  const handleChange = async (_event: unknown, next: Array<Tag | string>) => {
+    if (next.length > 10) return
+    const typed = next.find((item): item is string => typeof item === 'string')
+    if (!typed) {
+      onChange(next.filter((tag): tag is Tag => typeof tag !== 'string').map((tag) => tag.id))
+      return
     }
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+    const name = cleanTagName(typed)
+    if (!name) return
+    const existing = tags.find((tag) => tag.normalizedName === normalizeTagName(name))
+    if (existing) {
+      onChange([...new Set([...selected, existing.id])])
+      setInputValue('')
+      return
     }
-    document.addEventListener('pointerdown', onOutside)
-    document.addEventListener('keydown', onEscape)
-    return () => {
-      document.removeEventListener('pointerdown', onOutside)
-      document.removeEventListener('keydown', onEscape)
-    }
-  }, [open])
-
-  const choose = (tagId: string) => {
-    if (selected.length >= 10) return
-    onChange([...selected, tagId])
-    setSearch('')
-  }
-
-  const create = async () => {
-    const name = cleanTagName(search)
-    if (!name || exact || selected.length >= 10) return
     setCreating(true)
     setError('')
     try {
-      const tag = await onCreateTag(name)
-      if (!selectedSet.has(tag.id)) onChange([...selected, tag.id])
-      setSearch('')
+      const created = await onCreateTag(name)
+      onChange([...new Set([...selected, created.id])])
+      setInputValue('')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '创建标签失败')
     } finally {
@@ -63,39 +47,52 @@ export function TagPicker({ tags, selectedTagIds, onChange, onCreateTag, compact
   }
 
   return (
-    <fieldset ref={rootRef} className={`field-group tag-picker ${compact ? 'is-compact' : ''}`}>
-      <legend><Tags /> <span>标签 <small>可选，最多 10 个</small></span></legend>
-      <div className={`tag-picker-control ${open ? 'is-open' : ''}`}>
-        <div className="selected-tags">
-          {selectedTags.map((tag) => (
-            <span key={tag.id} className={`tag-chip is-${tag.color}`}>
-              <i />{tag.name}
-              <button type="button" aria-label={`移除标签 ${tag.name}`} onClick={() => onChange(selected.filter((id) => id !== tag.id))}><X /></button>
-            </span>
-          ))}
-          <button type="button" className="tag-add-button" onClick={() => setOpen((shown) => !shown)} disabled={selected.length >= 10}><Plus /> 添加标签</button>
-        </div>
-        {open && (
-          <div className="tag-picker-popover">
-            <div className="tag-search-row"><Tags /><input autoFocus value={search} placeholder="搜索或新建标签" maxLength={24} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => {
-              if (event.key !== 'Enter') return
-              event.preventDefault()
-              if (matches[0]) choose(matches[0].id)
-              else void create()
-            }} /></div>
-            <div className="tag-options" role="listbox" aria-label="可用标签">
-              {matches.map((tag) => (
-                <button key={tag.id} type="button" role="option" aria-selected="false" onClick={() => choose(tag.id)}><i className={`tag-color is-${tag.color}`} /><span>{tag.name}</span></button>
-              ))}
-              {!exact && normalizedSearch && (
-                <button type="button" className="create-tag-option" onClick={() => void create()} disabled={creating}><Plus /><span>{creating ? '正在创建…' : `创建“${cleanTagName(search)}”`}</span></button>
-              )}
-              {!matches.length && (!normalizedSearch || exact) && <p>没有更多可选标签。</p>}
-            </div>
-            {error && <p className="tag-picker-error" role="alert">{error}</p>}
-          </div>
+    <Box className="min-w-0">
+      <Autocomplete<Tag, true, false, true>
+        multiple
+        freeSolo
+        openOnFocus
+        forcePopupIcon
+        filterSelectedOptions
+        limitTags={compact ? 3 : 4}
+        options={tags}
+        value={selectedTags}
+        inputValue={inputValue}
+        loading={creating}
+        sx={{ '& .MuiInputBase-root': { minHeight: 40 } }}
+        loadingText="正在创建…"
+        noOptionsText={inputValue ? `按回车创建“${cleanTagName(inputValue)}”` : '没有更多可选标签'}
+        getOptionLabel={(option) => typeof option === 'string' ? option : option.name}
+        isOptionEqualToValue={(option, selectedTag) => typeof selectedTag !== 'string' && option.id === selectedTag.id}
+        onInputChange={(_, value) => setInputValue(value.slice(0, 24))}
+        onChange={(event, value) => void handleChange(event, value)}
+        renderValue={(value, getItemProps) => value.map((tag, index) => typeof tag === 'string' ? null : (
+          <Chip {...getItemProps({ index })} key={tag.id} label={tag.name} className={`tag-chip is-${tag.color}`} icon={<Box component="i" className={`tag-color is-${tag.color}`} />} />
+        ))}
+        renderOption={(props, option) => (
+          <Box component="li" {...props} key={typeof option === 'string' ? option : option.id} sx={{ display: 'flex', gap: 1 }}>
+            {typeof option !== 'string' && <Box component="i" className={`tag-color is-${option.color}`} />}
+            {typeof option === 'string' ? `创建“${option}”` : option.name}
+          </Box>
         )}
-      </div>
-    </fieldset>
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label={compact ? undefined : '标签'}
+            placeholder={selected.length ? '继续添加标签' : '搜索或输入新标签'}
+            slotProps={{
+              ...params.slotProps,
+              htmlInput: {
+                ...params.slotProps.htmlInput,
+                'aria-label': '标签',
+                maxLength: 24,
+              },
+            }}
+          />
+        )}
+      />
+      <FormHelperText>{selected.length}/10，可输入名称后按回车创建</FormHelperText>
+      {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
+    </Box>
   )
 }
