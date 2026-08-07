@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { signOut } from 'firebase/auth'
 import {
   Alert,
@@ -12,8 +12,10 @@ import {
   IconButton,
   Snackbar,
   Switch,
+  useMediaQuery,
 } from '@mui/material'
 import AddOutlined from '@mui/icons-material/AddOutlined'
+import AnalyticsOutlined from '@mui/icons-material/AnalyticsOutlined'
 import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
 import ArrowForwardOutlined from '@mui/icons-material/ArrowForwardOutlined'
 import CalendarMonthOutlined from '@mui/icons-material/CalendarMonthOutlined'
@@ -32,6 +34,7 @@ import StorageOutlined from '@mui/icons-material/StorageOutlined'
 import TuneOutlined from '@mui/icons-material/TuneOutlined'
 import { auth } from './lib/firebase'
 import { taskOverlapsScope } from './lib/date'
+import { isTaskComplete } from './lib/taskLogic'
 import { getRouteSurface } from './lib/routes'
 import { getSyncStatus } from './lib/syncStatus'
 import { useAuth } from './hooks/useAuth'
@@ -83,6 +86,7 @@ function App() {
   const { replaceWithBoard } = boardNavigation
   const board = boardNavigation.view
   const routeSurface = getRouteSurface(route)
+  const isMobile = useMediaQuery((theme) => theme.breakpoints.down('md'))
   const pwaInstall = usePwaInstall()
   const userId = user?.uid ?? null
   const taskData = useTaskData(userId, demoMode)
@@ -95,7 +99,13 @@ function App() {
   const [utilityExpanded, setUtilityExpanded] = useState(() => localStorage.getItem('qing-task:utility-panel') !== 'collapsed')
   const [showSwipeHint, setShowSwipeHint] = useState(() => localStorage.getItem('qing-task:swipe-hint') !== 'dismissed')
   const [confirmSignOut, setConfirmSignOut] = useState(false)
+  // 桌面端新建任务是纯本地抽屉，不占路由；仅移动端使用 /tasks/new 路由下钻
   const [formState, setFormState] = useState<{ copiedFrom?: string } | null>(null)
+  const [formCloseRequest, setFormCloseRequest] = useState<(() => void) | null>(null)
+  // 注意：requestClose 是函数，必须包一层再存入 state，否则会被 React 当作函数式更新器直接执行
+  const registerFormClose = useCallback((close: (() => void) | null) => {
+    setFormCloseRequest(() => close)
+  }, [])
   const selectedTaskId = route.name === 'task-detail' ? route.taskId : null
   const selectedTask = useMemo(
     () => taskData.tasks.find((task) => task.id === selectedTaskId) ?? null,
@@ -104,6 +114,7 @@ function App() {
   const { logs, error: logsError } = useTaskLogs(userId, selectedTask, demoMode)
   const settingsOpen = routeSurface === 'settings'
   const showingDetail = routeSurface === 'detail'
+  const showingForm = routeSurface === 'form'
   const showingBottomNav = routeSurface === 'board'
   const syncStatus = getSyncStatus({
     online,
@@ -139,8 +150,20 @@ function App() {
   }, [replaceWithBoard, selectedTask, selectedTaskId, taskData.dataReady])
 
   useEffect(() => {
+    if (route.name === 'task-new' && route.copyFrom && taskData.dataReady
+      && !taskData.tasks.some((task) => task.id === route.copyFrom)) {
+      replaceWithBoard()
+    }
+  }, [replaceWithBoard, route, taskData.dataReady, taskData.tasks])
+
+  const prevRouteSurfaceRef = useRef(routeSurface)
+  useEffect(() => {
+    const previousSurface = prevRouteSurfaceRef.current
+    prevRouteSurfaceRef.current = routeSurface
+    // 打开/关闭新建任务不打断看板滚动位置：桌面抽屉只是覆盖在列表上，移动端返回时由浏览器恢复原位
+    if (routeSurface === 'form' || previousSurface === 'form') return
     mainRef.current?.scrollTo({ top: 0 })
-  }, [route])
+  }, [route, routeSurface])
 
   const notify = (message: string, options: { actionLabel?: string; onAction?: () => void; duration?: number } = {}) => {
     setToast({ id: Date.now(), message, actionLabel: options.actionLabel, onAction: options.onAction, duration: options.duration ?? (options.actionLabel ? 10_000 : 2600) })
@@ -194,18 +217,27 @@ function App() {
     }
   }
 
-  const openTaskForm = (copiedFrom?: string) => setFormState(copiedFrom ? { copiedFrom } : {})
+  const openTaskForm = (copiedFrom?: string) => {
+    if (isMobile) boardNavigation.openTaskForm(copiedFrom)
+    else setFormState(copiedFrom ? { copiedFrom } : {})
+  }
+
+  // 稳定的关闭回调：内联箭头函数会每次渲染生成新引用，触发注册 effect 无限重渲染
+  const closeDesktopForm = useCallback(() => setFormState(null), [])
 
   const handleCreate = async (draft: TaskDraft, copiedFrom?: string) => {
     await taskData.createTask(draft, copiedFrom)
-    setFormState(null)
+    if (routeSurface === 'form') boardNavigation.returnToBoard()
+    else setFormState(null)
     notify(copiedFrom ? '任务副本已创建' : '任务已创建')
   }
 
+  // 开启“隐藏已完成任务”时，侧栏看板计数同步排除已完成任务
   const countForScope = (scope: BoardScope) =>
-    taskData.tasks.filter((task) => taskOverlapsScope(task, scope)).length
+    taskData.tasks.filter((task) => taskOverlapsScope(task, scope) && (!taskData.preferences.hideCompleted || !isTaskComplete(task))).length
 
-  const countForTag = (tagId: string) => taskData.tasks.filter((task) => task.tagIds?.includes(tagId)).length
+  const countForTag = (tagId: string) =>
+    taskData.tasks.filter((task) => task.tagIds?.includes(tagId) && (!taskData.preferences.hideCompleted || !isTaskComplete(task))).length
   const selectedTagNames = taskData.tags.filter((tag) => board.tagIds.includes(tag.id)).map((tag) => tag.name)
 
   if (authLoading && !demoMode) return <LoadingScreen />
@@ -215,10 +247,13 @@ function App() {
 
   const displayName = user?.displayName || (demoMode ? '体验用户' : '轻任务用户')
   const email = user?.email || (demoMode ? 'demo@local.preview' : '')
-  const formSource = formState?.copiedFrom
-    ? taskData.tasks.find((task) => task.id === formState.copiedFrom) ?? null
+  const formCopyFrom = showingForm
+    ? (route.name === 'task-new' ? route.copyFrom : undefined)
+    : formState?.copiedFrom
+  const formSource = formCopyFrom
+    ? taskData.tasks.find((task) => task.id === formCopyFrom) ?? null
     : null
-  const draftStorageKey = `qing-task:draft:${userId ?? 'demo'}:${formState?.copiedFrom ? `copy-${formState.copiedFrom}` : 'new'}`
+  const draftStorageKey = `qing-task:draft:${userId ?? 'demo'}:${formCopyFrom ? `copy-${formCopyFrom}` : 'new'}`
   const utilityVisible = !showingDetail && !settingsOpen
   const utilityCollapsed = utilityVisible && !utilityExpanded
   const mainWide = showingDetail || settingsOpen
@@ -274,6 +309,19 @@ function App() {
   ) : (
     boardView
   )
+  const formView = (
+    <TaskFormPanel
+      variant={isMobile ? 'page' : 'drawer'}
+      sourceTask={formSource}
+      draftStorageKey={draftStorageKey}
+      onClose={showingForm ? boardNavigation.returnToBoard : closeDesktopForm}
+      onRegisterClose={registerFormClose}
+      onSubmit={handleCreate}
+      onDirtyChange={setFormDirty}
+      tags={taskData.tags}
+      onCreateTag={taskData.createTag}
+    />
+  )
   const settingsView = (
     <SettingsView
       preferences={taskData.preferences}
@@ -296,11 +344,11 @@ function App() {
   )
 
   return (
-    <Box className={`grid min-h-svh bg-base md:grid-rows-[72px_minmax(0,1fr)] max-md:block max-md:bg-surface ${
+    <Box className={`grid min-h-svh bg-base transition-[grid-template-columns] duration-200 ease-out md:grid-rows-[72px_minmax(0,1fr)] max-md:block max-md:bg-surface ${
       utilityCollapsed
         ? 'lg:grid-cols-[64px_224px_minmax(560px,1fr)_56px] max-lg:grid-cols-[60px_192px_minmax(520px,1fr)_52px]'
         : 'lg:grid-cols-[64px_224px_minmax(560px,1fr)_248px] max-lg:grid-cols-[60px_192px_minmax(520px,1fr)_224px]'
-    } ${showingBottomNav ? 'max-md:pb-[calc(90px+env(safe-area-inset-bottom))]' : ''}`}>
+    } ${showingBottomNav ? 'max-md:pb-[calc(78px+env(safe-area-inset-bottom))]' : ''}`}>
       {/* 左侧图标栏 */}
       <Box component="aside" aria-label="主要导航" className="sticky top-0 z-[8] hidden h-svh flex-col items-center gap-6 border-r border-line bg-fill px-3 py-6 md:col-start-1 md:row-span-2 md:flex">
         <IconButton className="rail-brand size-10 rounded-md bg-gradient-to-br from-[#8997eb] to-[#697ada] text-white shadow-[0_7px_16px_rgba(99,117,215,0.25)] hover:from-[#8291e8] hover:to-[#6172d4] hover:text-white" onClick={() => boardNavigation.openTimeBoard('all')} aria-label="轻任务首页">
@@ -322,7 +370,8 @@ function App() {
         <nav aria-label="时间看板" className="grid gap-1">
           {(['all', 'today', 'week'] as BoardScope[]).map((scope) => {
             const ScopeIcon = scopeIcons[scope]
-            const active = board.kind === 'time' && board.calendarScope === scope
+            // 高亮只由当前路由决定：设置/详情等非看板路由下，看板侧栏不聚焦任何一项
+            const active = routeSurface === 'board' && board.kind === 'time' && board.calendarScope === scope
             return (
               <Button
                 key={scope}
@@ -344,7 +393,7 @@ function App() {
             </div>
             <nav aria-label="标签看板" className="grid gap-1">
               {taskData.tags.slice(0, 8).map((tag) => {
-                const active = board.kind === 'tag' && board.tagIds[0] === tag.id
+                const active = routeSurface === 'board' && board.kind === 'tag' && board.tagIds[0] === tag.id
                 return (
                   <Button
                     key={tag.id}
@@ -373,25 +422,25 @@ function App() {
         demoMode={demoMode}
         syncStatus={syncStatus}
         onSearchChange={setSearchTerm}
-        onBack={boardNavigation.returnToBoard}
+        onBack={showingForm && formCloseRequest ? formCloseRequest : boardNavigation.returnToBoard}
         onCreate={() => openTaskForm()}
         onOpenSettings={boardNavigation.openSettings}
         onSignOut={() => setConfirmSignOut(true)}
       />
 
-      {/* 主内容 */}
-      <main ref={(node) => { mainRef.current = node }} className={`min-w-0 overflow-auto bg-surface px-8 pt-8 pb-24 max-lg:px-6 max-md:overflow-visible max-md:bg-surface max-md:pt-5 max-md:pb-8 max-md:pr-[max(16px,env(safe-area-inset-right))] max-md:pl-[max(16px,env(safe-area-inset-left))] lg:col-start-3 lg:row-start-2 ${mainWide ? 'lg:col-span-2' : ''}`}>
+      {/* 主内容：移动端看板贴边展示，详情/新建/设置统一保留上下间距；横向间距由 main 统一提供，内容不再叠加自身 padding */}
+      <main ref={(node) => { mainRef.current = node }} className={`min-w-0 overflow-auto bg-surface px-8 pt-8 pb-24 max-lg:px-6 max-md:overflow-visible max-md:bg-surface max-md:pr-[max(16px,env(safe-area-inset-right))] max-md:pl-[max(16px,env(safe-area-inset-left))] lg:col-start-3 lg:row-start-2 ${routeSurface === 'board' ? 'max-md:pt-0 max-md:pb-0' : 'max-md:pt-5 max-md:pb-8'} ${mainWide ? 'lg:col-span-2' : ''}`}>
         {taskData.error && (
           <Alert severity="error" className="mb-2" action={<IconButton aria-label="关闭错误" onClick={() => taskData.setError('')}><CloseOutlined /></IconButton>}>
             {taskData.error}
           </Alert>
         )}
-        {settingsOpen ? settingsView : showingDetail ? detailView : boardView}
+        {settingsOpen ? settingsView : showingDetail ? detailView : showingForm && isMobile ? formView : boardView}
       </main>
 
-      {/* 右侧辅助面板 */}
+      {/* 右侧辅助面板：宽度由网格轨道过渡驱动，内容随折叠淡出；收起时 inert 移出焦点与无障碍树 */}
       {utilityVisible && (
-        <aside className={`border-l border-line bg-fill py-6 max-md:hidden lg:col-start-4 lg:row-start-2 ${utilityExpanded ? 'px-5' : 'px-2'}`}>
+        <aside className={`overflow-hidden border-l border-line bg-fill py-6 max-md:hidden lg:col-start-4 lg:row-start-2 ${utilityExpanded ? 'px-5' : 'px-1.5'}`}>
           <Button
             className={`mb-5 min-w-0 border border-line bg-surface text-ink-2 ${utilityExpanded ? 'min-h-10 w-full justify-start px-3' : 'mx-auto size-10 justify-center p-0'}`}
             onClick={toggleUtilityPanel}
@@ -400,8 +449,11 @@ function App() {
             {utilityExpanded ? <ChevronRightOutlined /> : <ChevronLeftOutlined />}
             <span className={utilityExpanded ? 'truncate text-[11px]' : 'sr-only'}>{utilityExpanded ? '收起辅助面板' : '操作指南'}</span>
           </Button>
-          {utilityExpanded && (
-            <div>
+          <div
+            className={`transition-opacity duration-150 ${utilityExpanded ? 'opacity-100 delay-75' : 'pointer-events-none opacity-0'}`}
+            inert={!utilityExpanded}
+            aria-hidden={!utilityExpanded}
+          >
               <section className="mb-6 border-b border-line pb-6">
                 <div className="mb-4 flex items-center gap-2">
                   <TuneOutlined className="text-primary" />
@@ -441,39 +493,29 @@ function App() {
                   <div className="grid min-w-0 gap-[3px]"><strong className="text-[11px]">{syncStatus.title}</strong><small className="text-[9px] leading-[1.45] text-muted">{syncStatus.detail}</small></div>
                 </div>
               </section>
-            </div>
-          )}
+          </div>
         </aside>
       )}
 
-      {/* 移动端底部导航 */}
+      {/* 移动端底部导航：统一 54px 高度；“分析”为占位入口，暂不响应点击 */}
       {showingBottomNav && (
-        <div className="fixed inset-x-[max(14px,calc(env(safe-area-inset-left)+8px))] bottom-[max(12px,calc(env(safe-area-inset-bottom)+8px))] z-20 mx-auto hidden max-w-[430px] grid-cols-[minmax(0,1fr)_56px] items-center gap-2.5 max-md:grid">
+        <div className="fixed inset-x-[max(14px,calc(env(safe-area-inset-left)+8px))] bottom-[max(12px,calc(env(safe-area-inset-bottom)+8px))] z-20 mx-auto hidden max-w-[430px] grid-cols-[minmax(0,1fr)_54px] items-center gap-2.5 max-md:grid">
           <BottomNavigation
             component="nav"
             aria-label="移动端导航"
             showLabels
-            value={settingsOpen ? 'settings' : 'tasks'}
-            className="grid min-h-16 grid-cols-2 place-items-stretch overflow-hidden rounded-full border border-line bg-white/95 px-1.5 py-1 shadow-[0_12px_32px_rgba(54,52,80,0.13)] backdrop-blur-xl"
+            value="tasks"
+            className="grid h-13.5 min-h-13.5 grid-cols-2 place-items-stretch overflow-hidden rounded-full border border-line bg-white/95 px-1.5 shadow-[0_12px_32px_rgba(54,52,80,0.13)] backdrop-blur-xl"
           >
             <BottomNavigationAction value="tasks" label="任务" icon={<ChecklistOutlined />} onClick={() => boardNavigation.openTimeBoard('all')} />
-            <BottomNavigationAction value="settings" label="设置" icon={<SettingsOutlined />} onClick={boardNavigation.openSettings} />
+            <BottomNavigationAction value="analytics" label="分析" icon={<AnalyticsOutlined />} />
           </BottomNavigation>
-          <Fab color="primary" aria-label="新建任务" onClick={() => openTaskForm()}><AddOutlined /></Fab>
+          <Fab color="primary" className="size-13.5" aria-label="新建任务" onClick={() => openTaskForm()}><AddOutlined /></Fab>
         </div>
       )}
 
-      {formState && (
-        <TaskFormPanel
-          sourceTask={formSource}
-          draftStorageKey={draftStorageKey}
-          onClose={() => setFormState(null)}
-          onSubmit={handleCreate}
-          onDirtyChange={setFormDirty}
-          tags={taskData.tags}
-          onCreateTag={taskData.createTag}
-        />
-      )}
+      {/* 桌面端新建任务：本地抽屉直接覆盖在当前页面上，不改变路由；也兼容桌面直接访问 /tasks/new 的情况 */}
+      {!isMobile && (formState !== null || showingForm) && formView}
 
       <ConfirmDialog
         open={confirmSignOut}

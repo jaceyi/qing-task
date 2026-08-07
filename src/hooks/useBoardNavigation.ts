@@ -41,6 +41,13 @@ export function useBoardNavigation(router: AppRouter) {
     navigate({ name: 'task-detail', taskId }, { backRoute: view.route })
   }, [navigate, view.route])
 
+  const openTaskForm = useCallback((copiedFrom?: string) => {
+    navigate(
+      copiedFrom ? { name: 'task-new', copyFrom: copiedFrom } : { name: 'task-new' },
+      { backRoute: view.route },
+    )
+  }, [navigate, view.route])
+
   const returnToBoard = useCallback(() => {
     goBackToBoard(view.route)
   }, [goBackToBoard, view.route])
@@ -57,6 +64,7 @@ export function useBoardNavigation(router: AppRouter) {
     openTagBoard,
     openSettings,
     openTask,
+    openTaskForm,
     returnToBoard,
     replaceWithBoard,
   }

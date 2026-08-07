@@ -62,6 +62,7 @@ export function AppHeader({
   const mobileSearchInputRef = useRef<HTMLInputElement>(null)
   const settingsOpen = routeSurface === 'settings'
   const showingDetail = routeSurface === 'detail'
+  const showingForm = routeSurface === 'form'
   const avatarText = displayName.slice(0, 1).toUpperCase()
 
   useEffect(() => {
@@ -81,7 +82,11 @@ export function AppHeader({
     <Box component="header" className="sticky top-0 z-10 flex h-[72px] min-w-0 items-center gap-4 border-b border-line bg-white/90 px-6 backdrop-blur max-md:h-[calc(64px+env(safe-area-inset-top))] max-md:gap-2.5 max-md:pr-[max(16px,env(safe-area-inset-right))] max-md:pb-0 max-md:pl-[max(16px,env(safe-area-inset-left))] max-md:pt-[env(safe-area-inset-top)] md:col-start-3 md:col-span-2">
       {/* 桌面面包屑 */}
       <Box className="mr-auto hidden items-center gap-2.5 text-[13px] md:flex">
-        {settingsOpen ? <span className="font-semibold text-ink">设置</span> : (
+        {settingsOpen ? <span className="font-semibold text-ink">设置</span> : routeSurface === 'form' ? (
+          <>
+            <span className="font-semibold text-ink">任务</span><b className="font-normal text-line-strong">/</b><strong className="font-medium text-muted">新建任务</strong>
+          </>
+        ) : (
           <>
             {showingDetail && <IconButton className="mr-0.5 size-8 border border-line bg-surface text-ink-2" onClick={onBack} aria-label="返回任务列表"><ArrowBackOutlined /></IconButton>}
             <span className="font-semibold text-ink">任务</span><b className="font-normal text-line-strong">/</b><strong className="font-medium text-muted">{selectedTask ? '详情' : boardKind === 'tag' ? '标签看板' : scopeLabels[calendarScope]}</strong>
@@ -89,9 +94,11 @@ export function AppHeader({
         )}
       </Box>
 
-      {/* 移动端标题 */}
-      <Box className={`mr-auto hidden min-w-0 items-center max-md:flex ${showingDetail ? '' : 'gap-2'}`}>
-        {showingDetail ? <IconButton className="size-11 shrink-0" onClick={onBack} aria-label="返回任务列表"><ArrowBackOutlined /></IconButton> : (
+      {/* 移动端标题：详情与新建页下钻时只显示返回箭头，与详情页逻辑一致 */}
+      <Box className={`mr-auto hidden min-w-0 items-center max-md:flex ${showingDetail || showingForm ? '' : 'gap-2'}`}>
+        {showingDetail || showingForm ? (
+          <IconButton className="size-11 shrink-0" onClick={onBack} aria-label={showingDetail ? '返回任务列表' : '返回'}><ArrowBackOutlined /></IconButton>
+        ) : (
           <>
             <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-white shadow-[0_6px_14px_rgba(99,117,215,0.2)]">
               <CheckOutlined sx={{ fontSize: 18 }} />

@@ -20,11 +20,12 @@ export type BoardRoute = TimeBoardRoute | TagBoardRoute
 
 export type AppRoute =
   | BoardRoute
+  | { name: 'task-new'; copyFrom?: string }
   | { name: 'task-detail'; taskId: string }
   | { name: 'settings' }
 
 export type AppRouteName = AppRoute['name']
-export type RouteSurface = 'board' | 'detail' | 'settings'
+export type RouteSurface = 'board' | 'detail' | 'settings' | 'form'
 export type RouteHistoryMode = 'push' | 'replace'
 
 export const DEFAULT_BOARD_ROUTE: TimeBoardRoute = { name: 'board', scope: 'all' }
@@ -49,8 +50,9 @@ interface RouteMetadata {
 const routeMetadata: Record<AppRouteName, RouteMetadata> = {
   board: { surface: 'board', historyMode: 'replace' },
   'tag-board': { surface: 'board', historyMode: 'replace' },
+  'task-new': { surface: 'form', historyMode: 'push' },
   'task-detail': { surface: 'detail', historyMode: 'push' },
-  settings: { surface: 'settings', historyMode: 'replace' },
+  settings: { surface: 'settings', historyMode: 'push' },
 }
 
 export interface AppRouteHandle extends RouteMetadata {
@@ -112,8 +114,11 @@ export const appRouteConfig: ConfiguredRoute[] = [
   route('all-tasks', routeDefinitions.all, 'board', (_, search) => parseTimeBoard('all', search)),
   route('today-tasks', routeDefinitions.today, 'board', (_, search) => parseTimeBoard('today', search)),
   route('week-tasks', routeDefinitions.week, 'board', (_, search) => parseTimeBoard('week', search)),
-  // 新建任务已不占用路由：/tasks/new 重定向回列表（兼容旧链接）。
-  route('new-task', routeDefinitions.taskNew, 'board', () => DEFAULT_BOARD_ROUTE),
+  // 新建任务路由：/tasks/new 打开新建表单（桌面为抽屉、移动为下钻页面），?copy= 携带复制来源。
+  route('new-task', routeDefinitions.taskNew, 'task-new', (_, search) => {
+    const copyFrom = search.get('copy')
+    return copyFrom ? { name: 'task-new', copyFrom } : { name: 'task-new' }
+  }),
   route('tag-board', routeDefinitions.tagBoard, 'tag-board', (params, search) => ({
     name: 'tag-board',
     tagId: params.tagId ?? '',
@@ -158,6 +163,10 @@ const routeBuilders: {
       params.set('to', route.customEnd)
     }
     return appendQuery(`/tasks/tags/${encodeURIComponent(route.tagId)}`, params)
+  },
+  'task-new': (route) => {
+    if (!route.copyFrom) return routeDefinitions.taskNew
+    return appendQuery(routeDefinitions.taskNew, new URLSearchParams({ copy: route.copyFrom }))
   },
   'task-detail': (route) => `/tasks/${encodeURIComponent(route.taskId)}`,
   settings: () => routeDefinitions.settings,

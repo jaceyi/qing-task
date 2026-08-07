@@ -324,7 +324,7 @@ export function TaskRow({ task, onOpen, onAction, onResetProgress, onNotify, onU
             <span onClickCapture={(event) => { if (negativeDisabled || acting) event.stopPropagation() }}>
               <IconButton
                 aria-label="进度减一"
-                className="size-[30px] translate-x-[5px] border border-[#f0c9ba] bg-surface p-0 text-apricot-strong opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
+                className="size-[30px] border border-[#f0c9ba] bg-surface p-0 text-apricot-strong opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
                 disabled={negativeDisabled || acting}
                 onClick={(event) => {
                   event.stopPropagation()
@@ -337,7 +337,7 @@ export function TaskRow({ task, onOpen, onAction, onResetProgress, onNotify, onU
             <span onClickCapture={(event) => { if (positiveDisabled || acting) event.stopPropagation() }}>
               <IconButton
                 aria-label="进度加一"
-                className="size-[30px] translate-x-[5px] border border-[#b9e7d6] bg-surface p-0 text-mint-strong opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100"
+                className="size-[30px] border border-[#b9e7d6] bg-surface p-0 text-mint-strong opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
                 disabled={positiveDisabled || acting}
                 onClick={(event) => {
                   event.stopPropagation()

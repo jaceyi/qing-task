@@ -11,11 +11,15 @@ describe('应用路由', () => {
     expect(parseAppRoute('/unknown')).toEqual({ name: 'board', scope: 'all' })
   })
 
-  it('详情与复制路由支持安全编码', () => {
+  it('详情与新建路由支持安全编码', () => {
     const detailPath = pathForRoute({ name: 'task-detail', taskId: '任务 / 1' })
     expect(parseAppRoute(detailPath)).toEqual({ name: 'task-detail', taskId: '任务 / 1' })
-    // 新建任务不再占用路由：旧链接重定向回全部任务列表
-    expect(parseAppRoute('/tasks/new', '?copy=task-1')).toEqual({ name: 'board', scope: 'all' })
+    // 新建任务路由：默认无参数，?copy= 携带复制来源
+    expect(parseAppRoute(routeDefinitions.taskNew)).toEqual({ name: 'task-new' })
+    expect(parseAppRoute(routeDefinitions.taskNew, '?copy=task-1')).toEqual({ name: 'task-new', copyFrom: 'task-1' })
+    const copyPath = pathForRoute({ name: 'task-new', copyFrom: '任务 / 1' })
+    const copyUrl = new URL(copyPath, 'https://example.com')
+    expect(parseAppRoute(copyUrl.pathname, copyUrl.search)).toEqual({ name: 'task-new', copyFrom: '任务 / 1' })
   })
 
   it('标签看板使用动态标签参数并保留时间范围', () => {

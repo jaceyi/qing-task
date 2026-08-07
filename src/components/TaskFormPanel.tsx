@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Box,
@@ -12,12 +12,11 @@ import {
   ToggleButtonGroup,
   Typography,
 } from '@mui/material'
-import ArrowBackOutlined from '@mui/icons-material/ArrowBackOutlined'
 import CheckOutlined from '@mui/icons-material/CheckOutlined'
 import CloseOutlined from '@mui/icons-material/CloseOutlined'
 import LayersOutlined from '@mui/icons-material/LayersOutlined'
 import { normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
-import { parseLocalDateTime, previewRecurrence } from '../lib/recurrence'
+import { parseLocalDateTime, previewRecurrence, syncRecurrenceTiming } from '../lib/recurrence'
 import type { Tag, Task, TaskDraft, TaskType } from '../types'
 import { ConfirmDialog } from './ConfirmDialog'
 import { FieldLabel } from './FieldLabel'
@@ -25,9 +24,13 @@ import { RecurrenceEditor } from './RecurrenceEditor'
 import { TagPicker } from './TagPicker'
 
 interface TaskFormPanelProps {
+  /** drawer：桌面端右侧抽屉；page：移动端路由下钻页面，顶部返回由应用顶栏承担。两者共用同一套表单内容与草稿保护逻辑。 */
+  variant?: 'drawer' | 'page'
   sourceTask?: Task | null
   draftStorageKey: string
   onClose: () => void
+  /** 向外层（如应用顶栏返回按钮）注册带脏检查的关闭入口；卸载时注销。 */
+  onRegisterClose?: (requestClose: (() => void) | null) => void
   onSubmit: (draft: TaskDraft, copiedFrom?: string) => Promise<void>
   onDirtyChange?: (dirty: boolean) => void
   tags?: Tag[]
@@ -41,17 +44,22 @@ function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
       targetCount: 5, count: 0, completed: false, tagIds: [], recurrence: null,
     }
   }
+  const startDate = normalizeDateTimeInput(sourceTask.startDate, 'start')
+  const endDate = normalizeDateTimeInput(sourceTask.endDate, 'end')
   return {
     title: `${sourceTask.title}（副本）`,
     description: sourceTask.description,
-    startDate: normalizeDateTimeInput(sourceTask.startDate, 'start'),
-    endDate: normalizeDateTimeInput(sourceTask.endDate, 'end'),
+    startDate,
+    endDate,
     type: sourceTask.type,
     targetCount: sourceTask.type === 'progress' ? sourceTask.targetCount : 5,
     count: 0,
     completed: false,
     tagIds: sourceTask.tagIds ?? [],
-    recurrence: null,
+    // 复制时保留重复规则，并把锚点重新对齐到副本的时间，作为全新系列开始
+    recurrence: sourceTask.recurrence && startDate
+      ? syncRecurrenceTiming(sourceTask.recurrence, startDate, endDate)
+      : null,
   }
 }
 
@@ -75,9 +83,11 @@ function readStoredDraft(storageKey: string, fallback: TaskDraft) {
 }
 
 export function TaskFormPanel({
+  variant = 'drawer',
   sourceTask,
   draftStorageKey,
   onClose,
+  onRegisterClose,
   onSubmit,
   onDirtyChange,
   tags = [],
@@ -123,10 +133,15 @@ export function TaskFormPanel({
     if (openerRef.current?.isConnected) openerRef.current.focus()
   }, [])
 
-  const requestClose = () => {
+  const requestClose = useCallback(() => {
     if (dirty) setConfirmDiscard(true)
     else onClose()
-  }
+  }, [dirty, onClose])
+
+  useEffect(() => {
+    onRegisterClose?.(requestClose)
+    return () => onRegisterClose?.(null)
+  }, [onRegisterClose, requestClose])
 
   const setType = (type: TaskType) => setDraft((current) => ({ ...current, type }))
 
@@ -157,25 +172,49 @@ export function TaskFormPanel({
     }
   }
 
-  return (
-    <>
-      <Drawer
-        anchor="right"
-        open
-        onClose={requestClose}
-        slotProps={{ paper: { sx: { width: { xs: '100%', sm: 520 }, maxWidth: '100vw' } } }}
-      >
-        <Box component="header" sx={{ minHeight: 72, px: { xs: 2, sm: 3 }, display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <IconButton className="md:hidden" onClick={requestClose} aria-label="返回"><ArrowBackOutlined /></IconButton>
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 700, letterSpacing: '.08em' }}>{sourceTask ? '复制任务' : '创建任务'}</Typography>
-            <Typography id="task-form-title" variant="h6" sx={{ fontSize: 19, fontWeight: 750 }}>{sourceTask ? '复制为新任务' : '新建任务'}</Typography>
-          </Box>
-          <IconButton onClick={requestClose} aria-label="关闭"><CloseOutlined /></IconButton>
-        </Box>
-        <Divider />
+  const isPage = variant === 'page'
 
-        <Box component="form" onSubmit={handleSubmit} sx={{ px: { xs: 2, sm: 3 }, py: 2.5, pb: 12, display: 'grid', gap: 2.5 }}>
+  const discardDialog = (
+    <ConfirmDialog
+      open={confirmDiscard}
+      title="退出新建任务？"
+      description="草稿已经保存在本机，你可以保留后退出，也可以彻底放弃。"
+      onClose={() => setConfirmDiscard(false)}
+      onConfirm={() => { localStorage.removeItem(draftStorageKey); onDirtyChange?.(false); onClose() }}
+      confirmLabel="放弃草稿"
+      confirmColor="error"
+      cancelLabel="继续编辑"
+      extraActions={<Button variant="outlined" onClick={() => { onDirtyChange?.(false); onClose() }}>保留并退出</Button>}
+    />
+  )
+
+  const content = (
+    <>
+      {isPage ? (
+        <Box component="header" className="mb-5 grid max-md:mb-4">
+          <Typography className="inline-flex items-center gap-1.5 font-bold tracking-[0.08em] text-primary-strong uppercase max-md:hidden" variant="caption">{sourceTask ? '复制任务' : '创建任务'}</Typography>
+          <Typography id="task-form-title" component="h1" className="text-[clamp(22px,2vw,26px)] leading-[1.18] tracking-[-0.035em] text-ink max-md:text-xl">{sourceTask ? '复制为新任务' : '新建任务'}</Typography>
+        </Box>
+      ) : (
+        <>
+          <Box component="header" sx={{ minHeight: 72, px: { xs: 2, sm: 3 }, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 700, letterSpacing: '.08em' }}>{sourceTask ? '复制任务' : '创建任务'}</Typography>
+              <Typography id="task-form-title" variant="h6" sx={{ fontSize: 19, fontWeight: 750 }}>{sourceTask ? '复制为新任务' : '新建任务'}</Typography>
+            </Box>
+            <IconButton onClick={requestClose} aria-label="关闭"><CloseOutlined /></IconButton>
+          </Box>
+          <Divider />
+        </>
+      )}
+
+      <Box
+        component="form"
+        onSubmit={handleSubmit}
+        sx={isPage
+          ? { py: 2.5, pb: 'calc(96px + env(safe-area-inset-bottom))', display: 'grid', gap: 2.5 }
+          : { px: { xs: 2, sm: 3 }, py: 2.5, pb: 12, display: 'grid', gap: 2.5 }}
+      >
           <TextField
             autoFocus
             required
@@ -244,24 +283,36 @@ export function TaskFormPanel({
 
           {error && <Alert severity="error">{error}</Alert>}
 
-          <Box sx={{ position: 'fixed', right: 0, bottom: 0, width: { xs: '100%', sm: 520 }, px: 3, py: 2, display: 'flex', justifyContent: 'flex-end', gap: 1, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', zIndex: 2 }}>
+          <Box sx={{ position: 'fixed', right: 0, bottom: 0, width: isPage ? '100%' : { xs: '100%', sm: 520 }, px: 3, py: 2, pb: isPage ? 'calc(8px + env(safe-area-inset-bottom))' : 2, display: 'flex', justifyContent: 'flex-end', gap: 1, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', zIndex: 2 }}>
             <Button variant="outlined" onClick={requestClose}>取消</Button>
             <Button type="submit" variant="contained" disabled={saving}>{saving ? '正在创建…' : sourceTask ? '创建副本' : '创建任务'}</Button>
           </Box>
         </Box>
-      </Drawer>
+    </>
+  )
 
-      <ConfirmDialog
-        open={confirmDiscard}
-        title="退出新建任务？"
-        description="草稿已经保存在本机，你可以保留后退出，也可以彻底放弃。"
-        onClose={() => setConfirmDiscard(false)}
-        onConfirm={() => { localStorage.removeItem(draftStorageKey); onDirtyChange?.(false); onClose() }}
-        confirmLabel="放弃草稿"
-        confirmColor="error"
-        cancelLabel="继续编辑"
-        extraActions={<Button variant="outlined" onClick={() => { onDirtyChange?.(false); onClose() }}>保留并退出</Button>}
-      />
+  if (isPage) {
+    return (
+      <>
+        <Box component="section" className="mx-auto w-full max-w-160" aria-labelledby="task-form-title">
+          {content}
+        </Box>
+        {discardDialog}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <Drawer
+        anchor="right"
+        open
+        onClose={requestClose}
+        slotProps={{ paper: { sx: { width: { xs: '100%', sm: 520 }, maxWidth: '100vw' } } }}
+      >
+        {content}
+      </Drawer>
+      {discardDialog}
     </>
   )
 }

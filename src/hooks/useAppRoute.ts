@@ -50,7 +50,8 @@ export function useAppRoute() {
         replace: (options.mode ?? getRouteHistoryMode(next)) === 'replace',
         state,
       })
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      // 新建任务以抽屉/下钻页覆盖当前内容，即时定位即可，避免平滑回顶动画；其余路由切换保持平滑回顶
+      window.scrollTo({ top: 0, behavior: next.name === 'task-new' ? 'auto' : 'smooth' })
     },
     [location.search, routerNavigate],
   )
