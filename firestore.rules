@@ -11,6 +11,7 @@ service cloud.firestore {
           'title', 'description', 'startDate', 'endDate', 'type', 'targetCount', 'count',
           'completed', 'schemaVersion', 'tagIds', 'recurrence', 'seriesState',
           'currentOccurrenceKey', 'occurrenceSequence', 'lastAdvanceMutationId',
+          'parentTaskId', 'occurrenceKey',
           'createdAt', 'updatedAt'
         ])
         && data.keys().hasAll([
@@ -32,13 +33,15 @@ service cloud.firestore {
         && data.targetCount is int
         && data.count is int
         && data.completed is bool
-        && (!('schemaVersion' in data) || (data.schemaVersion is int && data.schemaVersion in [1, 2]))
+        && (!('schemaVersion' in data) || (data.schemaVersion is int && data.schemaVersion in [1, 2, 3]))
         && (!('tagIds' in data) || (data.tagIds is list && data.tagIds.size() <= 10))
         && (!('recurrence' in data) || validRecurrence(data.recurrence, data.startDate, data.endDate))
         && (!('seriesState' in data) || data.seriesState == null || data.seriesState in ['active', 'ended'])
         && (!('currentOccurrenceKey' in data) || data.currentOccurrenceKey == null || data.currentOccurrenceKey is string)
         && (!('occurrenceSequence' in data) || (data.occurrenceSequence is int && data.occurrenceSequence >= 0))
         && (!('lastAdvanceMutationId' in data) || data.lastAdvanceMutationId == null || data.lastAdvanceMutationId is string)
+        && (!('parentTaskId' in data) || data.parentTaskId is string)
+        && (!('occurrenceKey' in data) || data.occurrenceKey is string)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && (
@@ -102,13 +105,16 @@ service cloud.firestore {
     }
 
     function validLog(data) {
-      return data.keys().hasOnly(['type', 'action', 'payload', 'createdAt'])
+      return data.keys().hasOnly(['type', 'action', 'payload', 'scope', 'occurrenceKey', 'seq', 'createdAt'])
         && data.keys().hasAll(['type', 'action', 'payload', 'createdAt'])
-        && data.type in ['update', 'progress', 'recurrence', 'tag']
+        && data.type in ['create', 'update', 'progress', 'recurrence', 'tag', 'type', 'status', 'roll']
         && data.action is string
         && data.action.size() > 0
         && data.action.size() <= 120
         && data.payload is map
+        && (!('scope' in data) || data.scope in ['series', 'occurrence'])
+        && (!('occurrenceKey' in data) || data.occurrenceKey is string)
+        && (!('seq' in data) || data.seq is int)
         && data.createdAt is timestamp;
     }
 

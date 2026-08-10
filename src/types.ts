@@ -5,7 +5,18 @@ export interface CustomDateRange {
   startDate: string
   endDate: string
 }
-export type TaskLogType = 'update' | 'progress' | 'recurrence' | 'tag'
+export type TaskLogType =
+  | 'create'
+  | 'update'
+  | 'progress'
+  | 'recurrence'
+  | 'tag'
+  | 'type'
+  | 'status'
+  | 'roll'
+
+/** 日志归属：系列级事件记在主任务时间线；周期级事件额外归属某一期，供完成实例回溯展示。 */
+export type TaskLogScope = 'series' | 'occurrence'
 export type RecurrenceFrequency = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7
 export type TagMatchMode = 'all' | 'any'
@@ -51,6 +62,9 @@ export interface Task {
   currentOccurrenceKey?: string | null
   occurrenceSequence?: number
   lastAdvanceMutationId?: string | null
+  /** 完成实例任务：所属系列任务与对应的周期 key，用于回溯该期的日志。 */
+  parentTaskId?: string
+  occurrenceKey?: string
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -82,6 +96,10 @@ export interface TaskLog {
   action: string
   payload: Record<string, unknown>
   createdAt: Date | null
+  scope?: TaskLogScope
+  occurrenceKey?: string
+  /** 同一时刻（同一 batch 的相同 serverTimestamp）内的排序依据：严格递增。 */
+  seq?: number
 }
 
 export interface UserPreferences {

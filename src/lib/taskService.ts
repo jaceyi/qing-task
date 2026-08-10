@@ -11,8 +11,10 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
+  where,
   writeBatch,
   type DocumentData,
+  type DocumentReference,
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from './firebase'
@@ -28,6 +30,7 @@ import type {
   TaskDraft,
   TaskInfoFields,
   TaskLog,
+  TaskLogScope,
   TaskLogType,
   TaskType,
   UserPreferences,
@@ -36,6 +39,8 @@ import type {
 export interface QueuedMutation<T> {
   result: T
   committed: Promise<void>
+  /** 本次写入的日志文档引用；撤销时按此精确擦除，避免事后搬运/模糊匹配。 */
+  logRefs?: DocumentReference[]
 }
 
 function unchanged<T>(result: T): QueuedMutation<T> {
@@ -67,6 +72,8 @@ function mapTask(id: string, data: DocumentData): Task {
       : null,
     occurrenceSequence: recurrence ? Math.max(1, Number(data.occurrenceSequence ?? 1)) : 0,
     lastAdvanceMutationId: typeof data.lastAdvanceMutationId === 'string' ? data.lastAdvanceMutationId : null,
+    parentTaskId: typeof data.parentTaskId === 'string' ? data.parentTaskId : undefined,
+    occurrenceKey: typeof data.occurrenceKey === 'string' ? data.occurrenceKey : undefined,
     createdAt: toDate(data.createdAt),
     updatedAt: toDate(data.updatedAt),
   }
@@ -128,8 +135,45 @@ function tagClaimRef(userId: string, normalizedName: string) {
   return doc(db, 'users', userId, 'tagNameClaims', encodeURIComponent(normalizedName))
 }
 
-function logData(type: TaskLogType, action: string, payload: Record<string, unknown>) {
-  return { type, action, payload, createdAt: serverTimestamp() }
+function logData(
+  type: TaskLogType,
+  action: string,
+  payload: Record<string, unknown>,
+  scope: TaskLogScope = 'series',
+  occurrenceKey?: string,
+) {
+  return {
+    type,
+    action,
+    payload,
+    scope,
+    ...(occurrenceKey ? { occurrenceKey } : {}),
+    seq: nextLogSeq(),
+    createdAt: serverTimestamp(),
+  }
+}
+
+// 同一 batch 内的多条日志共享同一个 serverTimestamp，用客户端严格递增序号保证因果顺序
+// （如“达标 +1”必须先于“完成本次重复任务”展示）
+let lastLogSeq = 0
+function nextLogSeq() {
+  const now = Date.now()
+  lastLogSeq = now > lastLogSeq ? now : lastLogSeq + 1
+  return lastLogSeq
+}
+
+export function sortLogsDesc(logs: TaskLog[]) {
+  return logs.sort((a, b) => {
+    const timeDiff = (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0)
+    if (timeDiff !== 0) return timeDiff
+    return (b.seq ?? 0) - (a.seq ?? 0)
+  })
+}
+
+/** 重复任务进行中的事件归属当前周期，供完成实例回溯展示；非重复任务归系列。 */
+function occurrenceScopeOf(task: Task): { scope: TaskLogScope; occurrenceKey?: string } {
+  const key = task.recurrence ? task.currentOccurrenceKey ?? occurrenceKey(task.startDate) : null
+  return key ? { scope: 'occurrence', occurrenceKey: key } : { scope: 'series' }
 }
 
 export function subscribeTasks(
@@ -195,7 +239,7 @@ export function createTask(
   })
   batch.set(
     newLogRef(userId, reference.id),
-    logData('update', copiedFrom ? '复制任务' : '创建任务', {
+    logData('create', copiedFrom ? '复制任务' : '创建任务', {
       ...(copiedFrom ? { copiedFrom } : {}),
       title: normalized.title,
     }),
@@ -211,26 +255,27 @@ export function updateTaskInfo(
   const next = updatedTaskInfo(current, fields)
   const patch: Record<string, unknown> = {}
   const changes: Array<{
+    type: TaskLogType
     action: string
     before: string | number
     after: string | number
   }> = []
   if (current.title !== next.title) {
     patch.title = next.title
-    changes.push({ action: '修改任务名称', before: current.title, after: next.title })
+    changes.push({ type: 'update', action: '修改任务名称', before: current.title, after: next.title })
   }
   if (current.description !== next.description) {
     patch.description = next.description
-    changes.push({ action: '修改任务描述', before: current.description, after: next.description })
+    changes.push({ type: 'update', action: '修改任务描述', before: current.description, after: next.description })
   }
   if (current.startDate !== next.startDate || current.endDate !== next.endDate) {
     patch.startDate = next.startDate
     patch.endDate = next.endDate
     if (current.startDate !== next.startDate) {
-      changes.push({ action: '修改开始时间', before: current.startDate, after: next.startDate })
+      changes.push({ type: 'update', action: '修改开始时间', before: current.startDate, after: next.startDate })
     }
     if (current.endDate !== next.endDate) {
-      changes.push({ action: '修改结束时间', before: current.endDate, after: next.endDate })
+      changes.push({ type: 'update', action: '修改结束时间', before: current.endDate, after: next.endDate })
     }
   }
   if (JSON.stringify(current.recurrence ?? null) !== JSON.stringify(next.recurrence ?? null)) {
@@ -239,6 +284,7 @@ export function updateTaskInfo(
     patch.currentOccurrenceKey = next.recurrence ? occurrenceKey(next.startDate) : null
     patch.occurrenceSequence = next.recurrence ? Math.max(1, current.occurrenceSequence ?? 1) : 0
     changes.push({
+      type: 'recurrence',
       action: next.recurrence ? (current.recurrence ? '修改重复计划' : '开启重复') : '关闭重复',
       before: current.recurrence ? '重复' : '不重复',
       after: next.recurrence ? '重复' : '不重复',
@@ -249,6 +295,7 @@ export function updateTaskInfo(
   if (JSON.stringify(currentTagIds) !== JSON.stringify(nextTagIds)) {
     patch.tagIds = nextTagIds
     changes.push({
+      type: 'tag',
       action: '修改任务标签',
       before: currentTagIds.length,
       after: nextTagIds.length,
@@ -257,6 +304,7 @@ export function updateTaskInfo(
   if (current.type === 'progress' && current.targetCount !== next.targetCount) {
     patch.targetCount = next.targetCount
     changes.push({
+      type: 'update',
       action: '修改目标次数',
       before: current.targetCount,
       after: next.targetCount,
@@ -265,6 +313,7 @@ export function updateTaskInfo(
   if (current.type === 'progress' && current.count !== next.count) {
     patch.count = next.count
     changes.push({
+      type: 'progress',
       action: '目标缩减，调整当前进度',
       before: current.count,
       after: next.count,
@@ -273,15 +322,17 @@ export function updateTaskInfo(
 
   if (changes.length === 0) return unchanged(false)
 
+  // 重复任务进行中的修改归属当前周期，完成实例可回溯；重复计划本身的变更是系列级事件
   const batch = writeBatch(db)
+  const logRefs: DocumentReference[] = []
   batch.update(taskRef(userId, current.id), { ...patch, updatedAt: serverTimestamp() })
   changes.forEach((change) => {
-    batch.set(
-      newLogRef(userId, current.id),
-      logData(change.action.includes('标签') ? 'tag' : change.action.includes('重复') ? 'recurrence' : 'update', change.action, { before: change.before, after: change.after }),
-    )
+    const ref = newLogRef(userId, current.id)
+    const scoped = change.type === 'recurrence' ? { scope: 'series' as const } : occurrenceScopeOf(current)
+    batch.set(ref, logData(change.type, change.action, { before: change.before, after: change.after }, scoped.scope, scoped.occurrenceKey))
+    logRefs.push(ref)
   })
-  return { result: true, committed: batch.commit() }
+  return { result: true, committed: batch.commit(), logRefs }
 }
 
 export function changeTaskType(
@@ -292,17 +343,19 @@ export function changeTaskType(
 ): QueuedMutation<boolean> {
   if (current.type === nextType) return unchanged(false)
   const next = switchedTaskValues(current, nextType, targetCount)
+  const scoped = occurrenceScopeOf(current)
   const batch = writeBatch(db)
+  const logRef = newLogRef(userId, current.id)
   batch.update(taskRef(userId, current.id), { ...next, updatedAt: serverTimestamp() })
   batch.set(
-    newLogRef(userId, current.id),
-    logData('update', '切换任务类型', {
+    logRef,
+    logData('type', '切换任务类型', {
       before: current.type,
       after: nextType,
       ...(nextType === 'progress' ? { targetCount: next.targetCount } : {}),
-    }),
+    }, scoped.scope, scoped.occurrenceKey),
   )
-  return { result: true, committed: batch.commit() }
+  return { result: true, committed: batch.commit(), logRefs: [logRef] }
 }
 
 export function setSingleCompletion(
@@ -314,20 +367,22 @@ export function setSingleCompletion(
   if (completed && current.recurrence && current.seriesState !== 'ended') {
     return advanceRecurringTask(userId, current, 'completed')
   }
+  const scoped = occurrenceScopeOf(current)
   const batch = writeBatch(db)
+  const logRef = newLogRef(userId, current.id)
   batch.update(taskRef(userId, current.id), {
     completed,
     ...(current.recurrence && !completed ? { seriesState: 'active' } : {}),
     updatedAt: serverTimestamp(),
   })
   batch.set(
-    newLogRef(userId, current.id),
-    logData('progress', completed ? '完成任务' : '取消完成', {
+    logRef,
+    logData('status', completed ? '完成任务' : '取消完成', {
       before: current.completed,
       after: completed,
-    }),
+    }, scoped.scope, scoped.occurrenceKey),
   )
-  return { result: true, committed: batch.commit() }
+  return { result: true, committed: batch.commit(), logRefs: [logRef] }
 }
 
 /** 已完成（或进行过）的进度任务一键归零；不可叠加撤销，与本机的“重置进度”日志对应。 */
@@ -336,13 +391,15 @@ export function resetTaskProgress(
   current: Task,
 ): QueuedMutation<boolean> {
   if (current.type !== 'progress' || current.count <= 0) return unchanged(false)
+  const scoped = occurrenceScopeOf(current)
   const batch = writeBatch(db)
+  const logRef = newLogRef(userId, current.id)
   batch.update(taskRef(userId, current.id), { count: 0, updatedAt: serverTimestamp() })
   batch.set(
-    newLogRef(userId, current.id),
-    logData('progress', '重置进度', { before: current.count, after: 0 }),
+    logRef,
+    logData('progress', '重置进度', { before: current.count, after: 0 }, scoped.scope, scoped.occurrenceKey),
   )
-  return { result: true, committed: batch.commit() }
+  return { result: true, committed: batch.commit(), logRefs: [logRef] }
 }
 
 export function adjustTaskProgress(
@@ -354,23 +411,26 @@ export function adjustTaskProgress(
   const nextCount = Math.max(0, Math.min(current.targetCount, current.count + delta))
   if (nextCount === current.count) return unchanged(false)
   if (delta > 0 && nextCount === current.targetCount && current.recurrence && current.seriesState !== 'ended') {
-    return advanceRecurringTask(userId, current, 'completed')
+    // 达标的那次推进也要留下记录：由 advance 一并写入本期的最后一条“进度 +1”
+    return advanceRecurringTask(userId, current, 'completed', new Date(), current.count)
   }
 
+  const scoped = occurrenceScopeOf(current)
   const batch = writeBatch(db)
+  const logRef = newLogRef(userId, current.id)
   batch.update(taskRef(userId, current.id), {
     count: increment(delta),
     updatedAt: serverTimestamp(),
   })
   batch.set(
-    newLogRef(userId, current.id),
+    logRef,
     logData('progress', delta > 0 ? '进度 +1' : '进度 −1', {
       before: current.count,
       after: nextCount,
       delta,
-    }),
+    }, scoped.scope, scoped.occurrenceKey),
   )
-  return { result: true, committed: batch.commit() }
+  return { result: true, committed: batch.commit(), logRefs: [logRef] }
 }
 
 export function advanceRecurringTask(
@@ -378,12 +438,14 @@ export function advanceRecurringTask(
   current: Task,
   result: 'completed' | 'skipped',
   completedAt = new Date(),
+  incrementFrom?: number,
 ): QueuedMutation<boolean> {
   if (!current.recurrence || current.seriesState === 'ended') return unchanged(false)
   const next = nextOccurrence(current, completedAt)
   const mutationId = crypto.randomUUID()
   const key = current.currentOccurrenceKey || occurrenceKey(current.startDate)
   const batch = writeBatch(db)
+  const logRefs: DocumentReference[] = []
   batch.set(
     occurrenceRef(userId, current.id, key),
     {
@@ -400,22 +462,40 @@ export function advanceRecurringTask(
       createdAt: serverTimestamp(),
     },
   )
+  // 达标的那次推进照常入账：它属于本期的真实操作，不再被“完成”事件吞掉
+  if (result === 'completed' && current.type === 'progress' && incrementFrom !== undefined) {
+    const incrementRef = newLogRef(userId, current.id)
+    batch.set(
+      incrementRef,
+      logData('progress', '进度 +1', {
+        before: incrementFrom,
+        after: current.targetCount,
+        delta: 1,
+      }, 'occurrence', key),
+    )
+    logRefs.push(incrementRef)
+  }
   const instanceTaskId = result === 'completed' && next ? completedOccurrenceTaskId(current.id, key) : null
+  const rollRef = newLogRef(userId, current.id)
   batch.set(
-    newLogRef(userId, current.id),
+    rollRef,
     logData('recurrence', result === 'completed' ? '完成本次重复任务' : '跳过本次重复任务', {
       occurrenceKey: key,
       result,
+      occurrenceSequence: current.occurrenceSequence ?? 1,
       scheduledStart: current.startDate,
       scheduledEnd: current.endDate,
       count: result === 'completed' && current.type === 'progress' ? current.targetCount : current.count,
       targetCount: current.targetCount,
       completedAt: completedAt.toISOString(),
+      ...(next ? { nextStartDate: next.startDate } : { seriesEnded: true }),
       ...(instanceTaskId ? { instanceTaskId } : {}),
-    }),
+    }, 'series', key),
   )
+  logRefs.push(rollRef)
   if (next) {
     if (result === 'completed' && instanceTaskId) {
+      // 实例任务是看板上的完成卡片：不建自己的日志，历史通过 parentTaskId + occurrenceKey 回溯系列日志流
       batch.set(taskRef(userId, instanceTaskId), {
         title: current.title,
         description: current.description,
@@ -425,28 +505,18 @@ export function advanceRecurringTask(
         targetCount: current.targetCount,
         count: current.type === 'progress' ? current.targetCount : 0,
         completed: current.type === 'single',
-        schemaVersion: 2,
+        schemaVersion: 3,
         tagIds: dedupeTagIds(current.tagIds),
         recurrence: null,
         seriesState: null,
         currentOccurrenceKey: null,
         occurrenceSequence: 0,
         lastAdvanceMutationId: null,
+        parentTaskId: current.id,
+        occurrenceKey: key,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })
-      // 实例任务的第一个记录：我自己什么时候完成的。
-      batch.set(
-        newLogRef(userId, instanceTaskId),
-        logData('progress', '完成任务', {
-          occurrenceKey: key,
-          scheduledStart: current.startDate,
-          scheduledEnd: current.endDate,
-          count: current.type === 'progress' ? current.targetCount : current.count,
-          targetCount: current.targetCount,
-          completedAt: completedAt.toISOString(),
-        }),
-      )
     }
     batch.update(taskRef(userId, current.id), {
       startDate: next.startDate,
@@ -475,39 +545,25 @@ export function advanceRecurringTask(
       updatedAt: serverTimestamp(),
     })
   }
-  return { result: true, committed: batch.commit() }
+  return { result: true, committed: batch.commit(), logRefs }
 }
 
-export function undoRecurringAdvance(
+/**
+ * 撤销 = 擦除：恢复任务字段，并删掉被撤销操作写入的日志与派生数据（occurrence 记录、实例任务）。
+ * 不写任何“撤销”日志：误操作不应该在历史中留下痕迹。
+ */
+export function eraseTaskAction(
   userId: string,
-  current: Task,
-  previous: Task,
+  taskId: string,
+  fields: Record<string, unknown>,
+  logRefs: DocumentReference[],
+  extra: { occurrenceKeys?: string[]; taskIds?: string[] } = {},
 ): QueuedMutation<boolean> {
-  if (!previous.recurrence || current.id !== previous.id) return unchanged(false)
-  const mutationId = crypto.randomUUID()
-  const previousKey = previous.currentOccurrenceKey ?? occurrenceKey(previous.startDate)
   const batch = writeBatch(db)
-  batch.delete(occurrenceRef(userId, current.id, previousKey))
-  batch.delete(taskRef(userId, completedOccurrenceTaskId(previous.id, previousKey)))
-  batch.update(taskRef(userId, current.id), {
-    startDate: previous.startDate,
-    endDate: previous.endDate,
-    count: previous.count,
-    completed: previous.completed,
-    recurrence: previous.recurrence,
-    seriesState: 'active',
-    currentOccurrenceKey: previous.currentOccurrenceKey ?? occurrenceKey(previous.startDate),
-    occurrenceSequence: previous.occurrenceSequence ?? 1,
-    lastAdvanceMutationId: mutationId,
-    updatedAt: serverTimestamp(),
-  })
-  batch.set(
-    newLogRef(userId, current.id),
-    logData('recurrence', '撤销完成本次', {
-      restoredOccurrenceKey: previous.currentOccurrenceKey ?? occurrenceKey(previous.startDate),
-      mutationId,
-    }),
-  )
+  batch.update(taskRef(userId, taskId), { ...fields, updatedAt: serverTimestamp() })
+  logRefs.forEach((ref) => batch.delete(ref))
+  extra.occurrenceKeys?.forEach((key) => batch.delete(occurrenceRef(userId, taskId, key)))
+  extra.taskIds?.forEach((id) => batch.delete(taskRef(userId, id)))
   return { result: true, committed: batch.commit() }
 }
 
@@ -515,45 +571,7 @@ export function skipRecurringOccurrence(userId: string, current: Task) {
   return advanceRecurringTask(userId, current, 'skipped')
 }
 
-/** 撤销进度重置：按绝对值恢复 count。 */
-export function restoreTaskProgress(
-  userId: string,
-  current: Task,
-  count: number,
-): QueuedMutation<boolean> {
-  if (current.type !== 'progress') return unchanged(false)
-  const nextCount = Math.max(0, Math.min(current.targetCount, count))
-  if (nextCount === current.count) return unchanged(false)
-  const batch = writeBatch(db)
-  batch.update(taskRef(userId, current.id), { count: nextCount, updatedAt: serverTimestamp() })
-  batch.set(
-    newLogRef(userId, current.id),
-    logData('progress', '撤销重置', { before: current.count, after: nextCount }),
-  )
-  return { result: true, committed: batch.commit() }
-}
-
-/** 把主任务在当前周期内的“进度 ±1”日志转移到完成的实例任务下，主任务保留一条“完成本次重复任务”。 */
-export async function migrateProgressLogsToCompletedInstance(
-  userId: string,
-  taskId: string,
-  instanceTaskId: string,
-): Promise<void> {
-  const snapshot = await getDocs(collection(db, 'users', userId, 'tasks', taskId, 'logs'))
-  const batch = writeBatch(db)
-  let moved = 0
-  for (const entry of snapshot.docs) {
-    const data = entry.data()
-    if (data.type === 'progress' && (data.action === '进度 +1' || data.action === '进度 −1')) {
-      batch.set(doc(db, 'users', userId, 'tasks', instanceTaskId, 'logs', entry.id), data)
-      batch.delete(entry.ref)
-      moved += 1
-    }
-  }
-  if (moved > 0) await batch.commit()
-}
-
-/** 清掉任务的日志子集合（用于撤销完成时一并移除实例任务的日志）。 */
+/** 清掉任务的日志子集合（删除任务时级联清理，含旧版实例任务自带的日志）。 */
 export async function deleteTaskLogs(userId: string, taskId: string): Promise<void> {
   const snapshot = await getDocs(collection(db, 'users', userId, 'tasks', taskId, 'logs'))
   if (snapshot.empty) return
@@ -671,17 +689,55 @@ export async function deleteTag(userId: string, tag: Tag) {
 export function deleteTask(userId: string, taskId: string): QueuedMutation<boolean> {
   const reference = taskRef(userId, taskId)
   const committed = deleteDoc(reference).then(async () => {
-    const [logs, occurrences] = await Promise.all([
+    const [logs, occurrences, linkedInstances, legacyInstances] = await Promise.all([
       getDocs(collection(reference, 'logs')),
       getDocs(collection(reference, 'occurrences')),
+      // 新版实例任务带 parentTaskId；旧版实例无该字段，按命名前缀兼容查找
+      getDocs(query(collection(db, 'users', userId, 'tasks'), where('parentTaskId', '==', taskId))),
+      getDocs(query(
+        collection(db, 'users', userId, 'tasks'),
+        where('__name__', '>=', `completed-${taskId}-`),
+        where('__name__', '<=', `completed-${taskId}-\uf8ff`),
+      )),
     ])
-    if (logs.empty && occurrences.empty) return
-    const batch = writeBatch(db)
-    logs.docs.forEach((entry) => batch.delete(entry.ref))
-    occurrences.docs.forEach((entry) => batch.delete(entry.ref))
-    await batch.commit()
+    const instances = new Map([...linkedInstances.docs, ...legacyInstances.docs].map((entry) => [entry.id, entry]))
+    const instanceSubCollections = await Promise.all(
+      [...instances.keys()].flatMap((instanceId) => [
+        getDocs(collection(db, 'users', userId, 'tasks', instanceId, 'logs')),
+        getDocs(collection(db, 'users', userId, 'tasks', instanceId, 'occurrences')),
+      ]),
+    )
+    const deletions = [
+      ...logs.docs,
+      ...occurrences.docs,
+      ...instances.values(),
+      ...instanceSubCollections.flatMap((snapshot) => snapshot.docs),
+    ]
+    if (deletions.length === 0) return
+    // 单个 batch 上限 500 次操作，分批提交
+    for (let index = 0; index < deletions.length; index += 400) {
+      const batch = writeBatch(db)
+      deletions.slice(index, index + 400).forEach((entry) => batch.delete(entry.ref))
+      await batch.commit()
+    }
   })
   return { result: true, committed }
+}
+
+const TASK_LOG_TYPES: TaskLogType[] = ['create', 'update', 'progress', 'recurrence', 'tag', 'type', 'status', 'roll']
+
+function mapTaskLog(entry: { id: string; data: (options?: { serverTimestamps: 'estimate' }) => DocumentData }): TaskLog {
+  const data = entry.data({ serverTimestamps: 'estimate' })
+  return {
+    id: entry.id,
+    type: TASK_LOG_TYPES.includes(data.type) ? data.type : 'update',
+    action: String(data.action ?? ''),
+    payload: (data.payload ?? {}) as Record<string, unknown>,
+    createdAt: toDate(data.createdAt),
+    scope: data.scope === 'occurrence' ? 'occurrence' : 'series',
+    occurrenceKey: typeof data.occurrenceKey === 'string' ? data.occurrenceKey : undefined,
+    seq: typeof data.seq === 'number' ? data.seq : undefined,
+  }
 }
 
 export function subscribeTaskLogs(
@@ -690,22 +746,29 @@ export function subscribeTaskLogs(
   onData: (logs: TaskLog[]) => void,
   onError: (error: Error) => void,
 ) {
-  const logsQuery = query(collection(taskRef(userId, taskId), 'logs'), orderBy('createdAt', 'desc'))
+  const logsQuery = query(collection(taskRef(userId, taskId), 'logs'))
   return onSnapshot(
     logsQuery,
-    (snapshot) =>
-      onData(
-        snapshot.docs.map((entry) => {
-          const data = entry.data({ serverTimestamps: 'estimate' })
-          return {
-            id: entry.id,
-            type: ['progress', 'recurrence', 'tag'].includes(data.type) ? data.type : 'update',
-            action: String(data.action ?? ''),
-            payload: (data.payload ?? {}) as Record<string, unknown>,
-            createdAt: toDate(data.createdAt),
-          }
-        }),
-      ),
+    (snapshot) => onData(sortLogsDesc(snapshot.docs.map(mapTaskLog))),
+    (error) => onError(error),
+  )
+}
+
+/** 完成实例的历史：回系列日志流按 occurrenceKey 查询（含本期内的进度/修改与收尾事件）。 */
+export function subscribeOccurrenceLogs(
+  userId: string,
+  parentTaskId: string,
+  occurrenceKey: string,
+  onData: (logs: TaskLog[]) => void,
+  onError: (error: Error) => void,
+) {
+  const logsQuery = query(
+    collection(taskRef(userId, parentTaskId), 'logs'),
+    where('occurrenceKey', '==', occurrenceKey),
+  )
+  return onSnapshot(
+    logsQuery,
+    (snapshot) => onData(sortLogsDesc(snapshot.docs.map(mapTaskLog))),
     (error) => onError(error),
   )
 }

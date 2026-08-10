@@ -89,6 +89,16 @@ function validateInfoFields(fields: TaskInfoFields, taskType: TaskType) {
 function describeLog(log: TaskLog) {
   const before = log.payload.before
   const after = log.payload.after
+  if (log.type === 'roll') {
+    const sequence = typeof log.payload.occurrenceSequence === 'number' ? `第 ${log.payload.occurrenceSequence} 期 · ` : ''
+    const scheduled = typeof log.payload.scheduledStart === 'string' && log.payload.scheduledStart
+      ? `${log.payload.scheduledStart}${typeof log.payload.scheduledEnd === 'string' && log.payload.scheduledEnd ? ` ~ ${log.payload.scheduledEnd}` : ''}`
+      : ''
+    const next = typeof log.payload.nextStartDate === 'string'
+      ? ` → 下一期 ${log.payload.nextStartDate}`
+      : log.payload.seriesEnded === true ? ' → 系列结束' : ''
+    return `${sequence}${scheduled}${next}`
+  }
   if (typeof before === 'boolean' || typeof before === 'number') {
     const value = (item: typeof before) => (typeof item === 'boolean' ? (item ? '完成' : '未完成') : String(item))
     return `${value(before)} → ${value(after as typeof before)}`

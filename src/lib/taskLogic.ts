@@ -12,9 +12,10 @@ export function completedOccurrenceTaskId(taskId: string, key: string) {
 }
 
 export function completedOccurrenceSnapshot(task: Task, completedAt = new Date()): Task {
+  const occurrenceKey = task.currentOccurrenceKey ?? task.startDate.replace(/[^0-9]/g, '')
   return {
     ...task,
-    id: completedOccurrenceTaskId(task.id, task.currentOccurrenceKey ?? task.startDate.replace(/[^0-9]/g, '')),
+    id: completedOccurrenceTaskId(task.id, occurrenceKey),
     count: task.type === 'progress' ? task.targetCount : 0,
     completed: task.type === 'single',
     recurrence: null,
@@ -22,6 +23,9 @@ export function completedOccurrenceSnapshot(task: Task, completedAt = new Date()
     currentOccurrenceKey: null,
     occurrenceSequence: 0,
     lastAdvanceMutationId: null,
+    // 实例任务是纯展示产物：自身不存日志，历史通过 parentTaskId + occurrenceKey 回系列日志流查询
+    parentTaskId: task.id,
+    occurrenceKey,
     createdAt: completedAt,
     updatedAt: completedAt,
   }

@@ -1,4 +1,4 @@
-import { matchRoutes, type NonIndexRouteObject, type Params } from 'react-router'
+import { matchPath } from 'react-router'
 import type { BoardScope, TagMatchMode, TimeFilterScope } from '../types'
 
 export interface TimeBoardRoute {
@@ -42,37 +42,13 @@ export const routeDefinitions = {
   settings: '/settings',
 } as const
 
-interface RouteMetadata {
-  surface: RouteSurface
-  historyMode: RouteHistoryMode
-}
-
-const routeMetadata: Record<AppRouteName, RouteMetadata> = {
-  board: { surface: 'board', historyMode: 'replace' },
-  'tag-board': { surface: 'board', historyMode: 'replace' },
-  'task-new': { surface: 'form', historyMode: 'push' },
-  'task-detail': { surface: 'detail', historyMode: 'push' },
-  settings: { surface: 'settings', historyMode: 'push' },
-}
-
-export interface AppRouteHandle extends RouteMetadata {
-  id: string
-  routeName: AppRouteName
-  parse: (params: Params<string>, search: URLSearchParams) => AppRoute
-}
-
-export type ConfiguredRoute = Omit<NonIndexRouteObject, 'handle' | 'path'> & {
-  path: string
-  handle: AppRouteHandle
-}
-
-function route(
-  id: string,
-  path: string,
-  routeName: AppRouteName,
-  parse: AppRouteHandle['parse'],
-): ConfiguredRoute {
-  return { path, handle: { id, routeName, parse, ...routeMetadata[routeName] } }
+const routeHistoryMode: Record<AppRouteName, RouteHistoryMode> = {
+  // 看板之间切换不产生历史堆栈，详情/新建/设置压入历史支持返回
+  board: 'replace',
+  'tag-board': 'replace',
+  'task-new': 'push',
+  'task-detail': 'push',
+  settings: 'push',
 }
 
 function appendQuery(path: string, params: URLSearchParams) {
@@ -80,7 +56,7 @@ function appendQuery(path: string, params: URLSearchParams) {
   return `${path}${search ? `?${search}` : ''}`
 }
 
-function parseIds(value: string | null) {
+export function parseIds(value: string | null) {
   return [...new Set((value ?? '').split(',').map((id) => id.trim()).filter(Boolean))].slice(0, 10)
 }
 
@@ -88,7 +64,21 @@ function validDate(value: string | null): value is string {
   return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value))
 }
 
-function parseTimeBoard(scope: BoardScope, search: URLSearchParams): TimeBoardRoute {
+/** react-router 的 matchPath 不解码百分号编码，路由匹配前需按段解码（与官方 decodePath 行为一致）。 */
+function decodePathname(pathname: string) {
+  try {
+    return pathname.split('/').map((segment) => decodeURIComponent(segment).replace(/\//g, '%2F')).join('/')
+  } catch {
+    return pathname
+  }
+}
+
+/** 按路由模式匹配已解码的 pathname，params 为解码后的值。 */
+export function matchRoutePath(pattern: string, pathname: string) {
+  return matchPath(pattern, decodePathname(pathname))
+}
+
+export function parseTimeBoard(scope: BoardScope, search: URLSearchParams): TimeBoardRoute {
   const tagIds = parseIds(search.get('tags'))
   return {
     name: 'board',
@@ -99,7 +89,7 @@ function parseTimeBoard(scope: BoardScope, search: URLSearchParams): TimeBoardRo
   }
 }
 
-function parseTagTimeScope(search: URLSearchParams) {
+export function parseTagTimeScope(search: URLSearchParams) {
   const scope = search.get('scope')
   const customStart = search.get('from')
   const customEnd = search.get('to')
@@ -108,35 +98,6 @@ function parseTagTimeScope(search: URLSearchParams) {
   }
   return { scope: scope === 'today' || scope === 'week' ? scope : 'all' } satisfies { scope: BoardScope }
 }
-
-export const appRouteConfig: ConfiguredRoute[] = [
-  route('root', routeDefinitions.root, 'board', () => DEFAULT_BOARD_ROUTE),
-  route('all-tasks', routeDefinitions.all, 'board', (_, search) => parseTimeBoard('all', search)),
-  route('today-tasks', routeDefinitions.today, 'board', (_, search) => parseTimeBoard('today', search)),
-  route('week-tasks', routeDefinitions.week, 'board', (_, search) => parseTimeBoard('week', search)),
-  // 新建任务路由：/tasks/new 打开新建表单（桌面为抽屉、移动为下钻页面），?copy= 携带复制来源。
-  route('new-task', routeDefinitions.taskNew, 'task-new', (_, search) => {
-    const copyFrom = search.get('copy')
-    return copyFrom ? { name: 'task-new', copyFrom } : { name: 'task-new' }
-  }),
-  route('tag-board', routeDefinitions.tagBoard, 'tag-board', (params, search) => ({
-    name: 'tag-board',
-    tagId: params.tagId ?? '',
-    ...parseTagTimeScope(search),
-  })),
-  route('legacy-tag-board', routeDefinitions.legacyTags, 'tag-board', (_, search) => {
-    const tagId = search.get('id') || parseIds(search.get('ids'))[0]
-    return tagId
-      ? { name: 'tag-board', tagId, ...parseTagTimeScope(search) }
-      : DEFAULT_BOARD_ROUTE
-  }),
-  route('task-detail', routeDefinitions.taskDetail, 'task-detail', (params) => ({
-    name: 'task-detail',
-    taskId: params.taskId ?? '',
-  })),
-  route('settings', routeDefinitions.settings, 'settings', () => ({ name: 'settings' })),
-  route('not-found', '*', 'board', () => DEFAULT_BOARD_ROUTE),
-]
 
 function boardPath(scope: BoardScope) {
   return scope === 'today'
@@ -172,25 +133,52 @@ const routeBuilders: {
   settings: () => routeDefinitions.settings,
 }
 
-export function parseAppRoute(pathname: string, search = ''): AppRoute {
-  const match = matchRoutes(appRouteConfig, { pathname })?.at(-1)
-  const handle = match?.route.handle as AppRouteHandle | undefined
-  return handle?.parse(match?.params ?? {}, new URLSearchParams(search)) ?? DEFAULT_BOARD_ROUTE
-}
-
 export function pathForRoute<Route extends AppRoute>(route: Route) {
   const build = routeBuilders[route.name] as (value: Route) => string
   return build(route)
 }
 
-export function getRouteSurface(route: AppRoute) {
-  return routeMetadata[route.name].surface
-}
-
 export function getRouteHistoryMode(route: AppRoute) {
-  return routeMetadata[route.name].historyMode
+  return routeHistoryMode[route.name]
 }
 
 export function isBoardRoute(route: AppRoute): route is BoardRoute {
   return route.name === 'board' || route.name === 'tag-board'
+}
+
+/** 从当前地址解析看板路由；非看板地址（详情/新建/设置等）返回 null。 */
+export function boardRouteFromLocation(pathname: string, search = ''): BoardRoute | null {
+  const params = new URLSearchParams(search)
+  if (pathname === routeDefinitions.all) return parseTimeBoard('all', params)
+  if (pathname === routeDefinitions.today) return parseTimeBoard('today', params)
+  if (pathname === routeDefinitions.week) return parseTimeBoard('week', params)
+  const tagMatch = matchRoutePath(routeDefinitions.tagBoard, pathname)
+  if (tagMatch) {
+    return { name: 'tag-board', tagId: tagMatch.params.tagId ?? '', ...parseTagTimeScope(params) }
+  }
+  return null
+}
+
+/** 由 pathname 判断当前渲染面，供布局层决定标题栏、底部导航、辅助面板的显隐。 */
+export function surfaceFromPathname(pathname: string): RouteSurface {
+  if (pathname === routeDefinitions.settings) return 'settings'
+  if (pathname === routeDefinitions.taskNew) return 'form'
+  if (
+    pathname === routeDefinitions.all
+    || pathname === routeDefinitions.today
+    || pathname === routeDefinitions.week
+    || pathname === routeDefinitions.legacyTags
+    || matchRoutePath(routeDefinitions.tagBoard, pathname)
+  ) return 'board'
+  if (matchRoutePath(routeDefinitions.taskDetail, pathname)) return 'detail'
+  // 未知路径会被路由表重定向回任务看板
+  return 'board'
+}
+
+/** 开发态 ?demo 体验参数需要在路由跳转后继续保留。 */
+export function withDevelopmentFlags(path: string, currentSearch: string) {
+  const next = new URL(path, window.location.origin)
+  const current = new URLSearchParams(currentSearch)
+  if (current.has('demo')) next.searchParams.set('demo', '1')
+  return `${next.pathname}${next.search}`
 }
