@@ -28,6 +28,7 @@ describe('应用路由', () => {
     expect(surfaceFromPathname('/tasks/tags/work')).toBe('board')
     expect(surfaceFromPathname(routeDefinitions.taskNew)).toBe('form')
     expect(surfaceFromPathname('/tasks/task-1')).toBe('detail')
+    expect(surfaceFromPathname(routeDefinitions.analytics)).toBe('analytics')
     expect(surfaceFromPathname(routeDefinitions.settings)).toBe('settings')
     expect(surfaceFromPathname('/unknown')).toBe('board')
   })
@@ -81,6 +82,13 @@ describe('应用路由', () => {
     expect(parseIds('work,focus')).toEqual(['work', 'focus'])
     expect(parseIds(' work ,, focus ,work')).toEqual(['work', 'focus'])
     expect(parseIds(null)).toEqual([])
+  })
+
+  it('分析路由压入历史并保留开发参数', () => {
+    expect(pathForRoute({ name: 'analytics' })).toBe(routeDefinitions.analytics)
+    expect(withDevelopmentFlags(pathForRoute({ name: 'analytics' }), '?demo=1')).toBe('/analytics?demo=1')
+    // 分析页不是看板：看板上下文解析返回 null，由调用方回退来源看板
+    expect(boardRouteFromLocation(routeDefinitions.analytics)).toBeNull()
   })
 
   it('开发态跳转保留 ?demo 参数', () => {

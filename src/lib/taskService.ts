@@ -18,10 +18,12 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from './firebase'
+import type { AnalyticsLog } from './analytics'
 import { nextOccurrence, occurrenceKey } from './recurrence'
 import { cleanTagName, dedupeTagIds, normalizeTagName } from './tagLogic'
 import { completedOccurrenceTaskId, normalizeTaskDraft, switchedTaskValues, updatedTaskInfo } from './taskLogic'
 import type {
+  OccurrenceRecord,
   RecurrenceRule,
   SyncState,
   Tag,
@@ -441,7 +443,7 @@ export function advanceRecurringTask(
   incrementFrom?: number,
 ): QueuedMutation<boolean> {
   if (!current.recurrence || current.seriesState === 'ended') return unchanged(false)
-  const next = nextOccurrence(current, completedAt)
+  const next = nextOccurrence(current)
   const mutationId = crypto.randomUUID()
   const key = current.currentOccurrenceKey || occurrenceKey(current.startDate)
   const batch = writeBatch(db)
@@ -780,6 +782,56 @@ export function subscribePreferences(
   return onSnapshot(doc(db, 'users', userId, 'settings', 'preferences'), (snapshot) => {
     onData({ hideCompleted: snapshot.exists() ? Boolean(snapshot.data().hideCompleted) : false })
   })
+}
+
+/**
+ * 分析页历史数据：按任务直读子集合拉取时间窗内的周期账本与完成相关日志。
+ * 不依赖集合组查询：安全规则按路径鉴权（isOwner），子集合直读最稳妥。
+ * - 重复任务全量读 occurrences 账本（系列数量少、每期一条，量可控）；
+ * - 非重复任务只读窗口内有更新的任务（完成必然刷新 updatedAt，是必要条件），
+ *   再用 createdAt 在服务端收窄。
+ */
+export async function fetchAnalyticsHistory(
+  userId: string,
+  since: Date,
+  tasks: Task[],
+): Promise<{ occurrences: OccurrenceRecord[]; logs: AnalyticsLog[] }> {
+  const sinceTimestamp = Timestamp.fromDate(since)
+  const seriesTasks = tasks.filter((task) => task.recurrence && !task.parentTaskId)
+  const logTasks = tasks.filter(
+    (task) => !task.recurrence && !task.parentTaskId && task.updatedAt !== null && task.updatedAt >= since,
+  )
+
+  const [occurrenceSnapshots, logSnapshots] = await Promise.all([
+    Promise.all(seriesTasks.map((task) => getDocs(collection(taskRef(userId, task.id), 'occurrences')))),
+    Promise.all(logTasks.map((task) => getDocs(query(collection(taskRef(userId, task.id), 'logs'), where('createdAt', '>=', sinceTimestamp))))),
+  ])
+
+  const occurrences: OccurrenceRecord[] = occurrenceSnapshots.flatMap((snapshot, index) => snapshot.docs.map((entry) => {
+    const data = entry.data()
+    const completedAt = typeof data.completedAt === 'string' ? new Date(data.completedAt) : toDate(data.completedAt)
+    return {
+      taskId: seriesTasks[index].id,
+      occurrenceKey: typeof data.occurrenceKey === 'string' ? data.occurrenceKey : entry.id,
+      result: data.result === 'skipped' ? 'skipped' : 'completed',
+      scheduledStart: String(data.scheduledStart ?? ''),
+      scheduledEnd: String(data.scheduledEnd ?? ''),
+      count: Number(data.count ?? 0),
+      targetCount: Number(data.targetCount ?? 0),
+      title: String(data.title ?? ''),
+      tagIds: Array.isArray(data.tagIds)
+        ? data.tagIds.filter((tagId): tagId is string => typeof tagId === 'string')
+        : [],
+      completedAt: completedAt && !Number.isNaN(completedAt.getTime()) ? completedAt : null,
+    }
+  }))
+
+  const logs: AnalyticsLog[] = logSnapshots.flatMap((snapshot, index) => snapshot.docs
+    .map((entry) => ({ ...mapTaskLog(entry), taskId: logTasks[index].id }))
+    // 分析页只需要能还原完成时刻的日志：状态变更与进度推进
+    .filter((log) => (log.type === 'status' || log.type === 'progress') && log.createdAt !== null))
+
+  return { occurrences, logs }
 }
 
 export async function savePreferences(userId: string, preferences: UserPreferences) {

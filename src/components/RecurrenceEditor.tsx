@@ -18,7 +18,7 @@ import RepeatOutlined from '@mui/icons-material/RepeatOutlined'
 import { DatePicker } from '@mui/x-date-pickers/DatePicker'
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker'
 import { TimePicker } from '@mui/x-date-pickers/TimePicker'
-import { formatDateRange } from '../lib/date'
+import { addDays, formatDateRange, startOfLocalDay } from '../lib/date'
 import {
   createRecurrenceRule,
   describeRecurrence,
@@ -140,7 +140,11 @@ export function RecurrenceEditor({
 }: RecurrenceEditorProps) {
   const rule = value ?? null
   const time = timeFrom(startDate || endDate)
-  const previews = useMemo(() => rule ? previewRecurrence(rule, 3) : [], [rule])
+  // “后续三次”按自然日理解：从明天零点起取未来的期，今天已不属于“后续”
+  const previews = useMemo(() => {
+    if (!rule) return []
+    return previewRecurrence(rule, 3, startOfLocalDay(addDays(new Date(), 1)))
+  }, [rule])
 
   const commitRule = (nextRule: RecurrenceRule, nextTime = time, baseOverride?: Date) => {
     const base = baseOverride

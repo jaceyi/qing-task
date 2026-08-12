@@ -23,9 +23,10 @@ export type AppRoute =
   | { name: 'task-new'; copyFrom?: string }
   | { name: 'task-detail'; taskId: string }
   | { name: 'settings' }
+  | { name: 'analytics' }
 
 export type AppRouteName = AppRoute['name']
-export type RouteSurface = 'board' | 'detail' | 'settings' | 'form'
+export type RouteSurface = 'board' | 'detail' | 'settings' | 'form' | 'analytics'
 export type RouteHistoryMode = 'push' | 'replace'
 
 export const DEFAULT_BOARD_ROUTE: TimeBoardRoute = { name: 'board', scope: 'all' }
@@ -39,16 +40,18 @@ export const routeDefinitions = {
   taskNew: '/tasks/new',
   tagBoard: '/tasks/tags/:tagId',
   legacyTags: '/tasks/tags',
+  analytics: '/analytics',
   settings: '/settings',
 } as const
 
 const routeHistoryMode: Record<AppRouteName, RouteHistoryMode> = {
-  // 看板之间切换不产生历史堆栈，详情/新建/设置压入历史支持返回
+  // 看板之间切换不产生历史堆栈，详情/新建/设置/分析压入历史支持返回
   board: 'replace',
   'tag-board': 'replace',
   'task-new': 'push',
   'task-detail': 'push',
   settings: 'push',
+  analytics: 'push',
 }
 
 function appendQuery(path: string, params: URLSearchParams) {
@@ -131,6 +134,7 @@ const routeBuilders: {
   },
   'task-detail': (route) => `/tasks/${encodeURIComponent(route.taskId)}`,
   settings: () => routeDefinitions.settings,
+  analytics: () => routeDefinitions.analytics,
 }
 
 export function pathForRoute<Route extends AppRoute>(route: Route) {
@@ -162,6 +166,7 @@ export function boardRouteFromLocation(pathname: string, search = ''): BoardRout
 /** 由 pathname 判断当前渲染面，供布局层决定标题栏、底部导航、辅助面板的显隐。 */
 export function surfaceFromPathname(pathname: string): RouteSurface {
   if (pathname === routeDefinitions.settings) return 'settings'
+  if (pathname === routeDefinitions.analytics) return 'analytics'
   if (pathname === routeDefinitions.taskNew) return 'form'
   if (
     pathname === routeDefinitions.all

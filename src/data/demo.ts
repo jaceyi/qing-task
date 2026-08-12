@@ -1,12 +1,18 @@
 import { addDays, toDateTimeInput } from '../lib/date'
 import { createRecurrenceRule, occurrenceKey } from '../lib/recurrence'
-import type { Tag, Task } from '../types'
+import type { AnalyticsLog } from '../lib/analytics'
+import type { OccurrenceRecord, Tag, Task } from '../types'
 
 const today = new Date()
 const date = (offset: number, hour: number, minute = 0) => {
   const value = addDays(today, offset)
   value.setHours(hour, minute, 0, 0)
   return toDateTimeInput(value)
+}
+const timestamp = (offset: number, hour: number, minute = 0) => {
+  const value = addDays(today, offset)
+  value.setHours(hour, minute, 0, 0)
+  return value
 }
 
 export const demoTags: Tag[] = [
@@ -96,6 +102,20 @@ export const demoTasks: Task[] = [
     updatedAt: new Date(),
   },
   {
+    id: 'demo-10',
+    title: '回复合作邮件',
+    description: '确认合作意向与下次会议时间。',
+    startDate: date(-1, 10),
+    endDate: date(-1, 12),
+    type: 'single',
+    targetCount: 0,
+    count: 0,
+    completed: false,
+    tagIds: ['tag-work'],
+    createdAt: timestamp(-2, 9),
+    updatedAt: timestamp(-2, 9),
+  },
+  {
     id: 'demo-5',
     title: '背单词',
     description: '',
@@ -123,4 +143,149 @@ export const demoTasks: Task[] = [
     createdAt: new Date(Date.now() - 6000),
     updatedAt: new Date(),
   },
+  {
+    id: 'demo-8',
+    title: '提交周报',
+    description: '汇总本周进展与下周计划。',
+    startDate: date(-2, 17),
+    endDate: date(-2, 18),
+    type: 'single',
+    targetCount: 0,
+    count: 0,
+    completed: true,
+    tagIds: ['tag-work'],
+    createdAt: timestamp(-3, 9),
+    updatedAt: timestamp(-2, 17, 40),
+  },
+  {
+    id: 'demo-7',
+    title: '预约牙医',
+    description: '',
+    startDate: date(-2, 9),
+    endDate: date(-2, 9, 30),
+    type: 'single',
+    targetCount: 0,
+    count: 0,
+    completed: true,
+    tagIds: ['tag-life'],
+    createdAt: timestamp(-6, 20),
+    updatedAt: timestamp(-2, 10, 15),
+  },
+  {
+    id: 'demo-9',
+    title: '买生日礼物',
+    description: '',
+    startDate: date(-9, 12),
+    endDate: date(-9, 13),
+    type: 'single',
+    targetCount: 0,
+    count: 0,
+    completed: true,
+    tagIds: ['tag-life'],
+    createdAt: timestamp(-10, 21),
+    updatedAt: timestamp(-9, 12, 30),
+  },
 ]
+
+/** 体验模式下的周期账本：阅读（每天）与产品方案（每周）的历史执行情况。 */
+const demoReadingPattern: Array<[number, 'completed' | 'skipped', number, number]> = [
+  [-1, 'completed', 22, 10],
+  [-2, 'completed', 19, 5],
+  [-3, 'completed', 19, 20],
+  [-4, 'skipped', 21, 0],
+  [-5, 'completed', 20, 5],
+  [-6, 'completed', 19, 40],
+  [-7, 'completed', 19, 12],
+  [-8, 'completed', 19, 25],
+  [-9, 'skipped', 20, 30],
+  [-10, 'completed', 19, 2],
+  [-11, 'completed', 19, 28],
+  [-12, 'completed', 21, 15],
+  [-13, 'completed', 19, 18],
+]
+
+const demoPlanPattern: Array<[number, 'completed' | 'skipped', number, number]> = [
+  [-7, 'completed', 16, 50],
+  [-14, 'completed', 15, 30],
+  [-21, 'skipped', 10, 0],
+]
+
+function demoOccurrences(
+  taskId: string,
+  pattern: Array<[number, 'completed' | 'skipped', number, number]>,
+  scheduledHour: number,
+  scheduledMinute: number,
+  durationMinutes: number,
+  targetCount: number,
+): OccurrenceRecord[] {
+  return pattern.map(([offset, result, hour, minute]) => {
+    const scheduledStart = date(offset, scheduledHour, scheduledMinute)
+    return {
+      taskId,
+      occurrenceKey: occurrenceKey(scheduledStart),
+      result,
+      scheduledStart,
+      scheduledEnd: date(offset, scheduledHour, scheduledMinute + durationMinutes),
+      count: result === 'completed' ? targetCount : 0,
+      targetCount,
+      title: taskId === 'demo-3' ? '阅读 30 分钟' : '写完产品方案',
+      tagIds: taskId === 'demo-3' ? ['tag-focus', 'tag-health'] : ['tag-work', 'tag-focus'],
+      completedAt: timestamp(offset, hour, minute),
+    }
+  })
+}
+
+/** 体验模式下的完成日志：覆盖非重复任务的完成时刻。 */
+const demoCompletionLogs: AnalyticsLog[] = [
+  {
+    id: 'demo-log-desk-done',
+    taskId: 'demo-6',
+    type: 'status',
+    action: '完成任务',
+    payload: { before: false, after: true },
+    createdAt: timestamp(0, 11, 20),
+  },
+  {
+    id: 'demo-log-words-done',
+    taskId: 'demo-5',
+    type: 'progress',
+    action: '进度 +1',
+    payload: { before: 19, after: 20, delta: 1 },
+    createdAt: timestamp(-1, 8, 40),
+  },
+  {
+    id: 'demo-log-report-done',
+    taskId: 'demo-8',
+    type: 'status',
+    action: '完成任务',
+    payload: { before: false, after: true },
+    createdAt: timestamp(-2, 17, 40),
+  },
+  {
+    id: 'demo-log-dentist-done',
+    taskId: 'demo-7',
+    type: 'status',
+    action: '完成任务',
+    payload: { before: false, after: true },
+    createdAt: timestamp(-2, 10, 15),
+  },
+  {
+    id: 'demo-log-gift-done',
+    taskId: 'demo-9',
+    type: 'status',
+    action: '完成任务',
+    payload: { before: false, after: true },
+    createdAt: timestamp(-9, 12, 30),
+  },
+]
+
+/** 体验模式分析数据：周期账本 + 完成日志，让 /analytics 在 ?demo 下同样可看。 */
+export function buildDemoAnalyticsHistory(): { occurrences: OccurrenceRecord[]; logs: AnalyticsLog[] } {
+  return {
+    occurrences: [
+      ...demoOccurrences('demo-3', demoReadingPattern, 19, 0, 30, 0),
+      ...demoOccurrences('demo-1', demoPlanPattern, 9, 0, 510, 5),
+    ],
+    logs: demoCompletionLogs,
+  }
+}

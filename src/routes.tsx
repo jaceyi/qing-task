@@ -8,6 +8,7 @@ import {
   withDevelopmentFlags,
   type TagBoardRoute,
 } from './lib/routes'
+import { AnalyticsPage } from './pages/AnalyticsPage'
 import { BoardPage } from './pages/BoardPage'
 import { NewTaskPage } from './pages/NewTaskPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -43,6 +44,7 @@ export function AppRoutes() {
         <Route path={routeDefinitions.legacyTags} element={<LegacyTagBoardRedirect />} />
         <Route path={routeDefinitions.tagBoard} element={<TagBoardPage />} />
         <Route path={routeDefinitions.taskDetail} element={<TaskDetailPage />} />
+        <Route path={routeDefinitions.analytics} element={<AnalyticsPage />} />
         <Route path={routeDefinitions.settings} element={<SettingsPage />} />
         <Route path="*" element={<RedirectToTasks />} />
       </Route>

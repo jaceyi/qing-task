@@ -3,6 +3,7 @@ import {
   completedOccurrenceSnapshot,
   filterAndSortTasks,
   isTaskComplete,
+  isTaskOverdue,
   normalizeTaskDraft,
   switchedTaskValues,
   updatedTaskInfo,
@@ -28,6 +29,25 @@ describe('任务状态逻辑', () => {
     expect(isTaskComplete({ ...baseTask, count: 5 })).toBe(true)
     expect(isTaskComplete({ ...baseTask, type: 'single', completed: true })).toBe(true)
     expect(isTaskComplete({ ...baseTask, type: 'single', completed: false })).toBe(false)
+  })
+
+  it('逾期判断以计划结束时间为界，已完成与已结束系列不算逾期', () => {
+    const reference = new Date(2026, 7, 12, 15, 30)
+    // 仅日期的结束时间按当天 23:59 处理
+    expect(isTaskOverdue(baseTask, reference)).toBe(true)
+    expect(isTaskOverdue(baseTask, new Date(2026, 6, 28, 23, 0))).toBe(false)
+    expect(isTaskOverdue(baseTask, new Date(2026, 6, 29, 0, 0))).toBe(true)
+    // 完成后不再逾期
+    expect(isTaskOverdue({ ...baseTask, count: 5 }, reference)).toBe(false)
+    expect(isTaskOverdue({ ...baseTask, type: 'single', completed: true }, reference)).toBe(false)
+    // 未到期与无时间任务不逾期
+    expect(isTaskOverdue({ ...baseTask, endDate: '2026-08-20' }, reference)).toBe(false)
+    expect(isTaskOverdue({ ...baseTask, endDate: '' }, reference)).toBe(false)
+    // 被跳过结束的系列不再参与逾期判定
+    expect(isTaskOverdue({ ...baseTask, seriesState: 'ended' }, reference)).toBe(false)
+    // 重复任务按当前一期判断：本期已过逾期，本期未过不逾期
+    expect(isTaskOverdue({ ...baseTask, endDate: '2026-08-11T09:30', seriesState: 'active' }, reference)).toBe(true)
+    expect(isTaskOverdue({ ...baseTask, endDate: '2026-08-12T19:30', seriesState: 'active' }, reference)).toBe(false)
   })
 
   it('把完成的一期复制成无重复属性的历史任务', () => {
@@ -64,6 +84,17 @@ describe('任务状态逻辑', () => {
     ]
     const result = filterAndSortTasks(tasks, 'today', false, '', new Date(2026, 6, 28))
     expect(result.map((task) => task.id)).toEqual(['active', 'done'])
+  })
+
+  it('将逾期未完成任务排在未完成区最前', () => {
+    const reference = new Date(2026, 7, 12)
+    const tasks = [
+      { ...baseTask, id: 'future', startDate: '2026-08-20', endDate: '2026-08-20', createdAt: new Date(100) },
+      { ...baseTask, id: 'overdue', startDate: '2026-08-10', endDate: '2026-08-10', createdAt: new Date(50) },
+      { ...baseTask, id: 'done-overdue', startDate: '2026-08-01', endDate: '2026-08-01', count: 5, createdAt: new Date(200) },
+    ]
+    const result = filterAndSortTasks(tasks, 'all', false, '', reference)
+    expect(result.map((task) => task.id)).toEqual(['overdue', 'future', 'done-overdue'])
   })
 
   it('全部看板包含无时间任务，今天看板不包含', () => {

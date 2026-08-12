@@ -1,6 +1,7 @@
 import { fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { addDays, toDateTimeInput } from '../lib/date'
 import type { Task } from '../types'
 import { TaskRow } from './TaskRow'
 
@@ -103,6 +104,46 @@ describe('任务行手势', () => {
 
     expect(container.querySelector('.task-date')).toHaveTextContent('无时间')
     expect(container.querySelector('.task-date [data-testid="CalendarTodayOutlinedIcon"]')).toBeInTheDocument()
+  })
+
+  it('逾期未完成任务显示逾期标识，完成或未到期任务不显示', () => {
+    const overdueTask: Task = {
+      ...singleTask,
+      startDate: toDateTimeInput(addDays(new Date(), -2)),
+      endDate: toDateTimeInput(addDays(new Date(), -1)),
+    }
+    const { container, rerender } = render(
+      <TaskRow
+        task={overdueTask}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => false)}
+        onNotify={vi.fn()}
+      />,
+    )
+
+    expect(container.querySelector('.overdue-badge')).toHaveTextContent('逾期')
+    expect(container.querySelector('.task-date')).toHaveClass('text-apricot-strong')
+
+    rerender(
+      <TaskRow
+        task={{ ...overdueTask, completed: true }}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => false)}
+        onNotify={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('.overdue-badge')).not.toBeInTheDocument()
+
+    rerender(
+      <TaskRow
+        task={{ ...overdueTask, startDate: toDateTimeInput(addDays(new Date(), 1)), endDate: toDateTimeInput(addDays(new Date(), 2)) }}
+        onOpen={vi.fn()}
+        onAction={vi.fn(async () => false)}
+        onNotify={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('.overdue-badge')).not.toBeInTheDocument()
+    expect(container.querySelector('.task-date')).not.toHaveClass('text-apricot-strong')
   })
 
   it('向右拖动时只显示浅绿色完成底层', () => {

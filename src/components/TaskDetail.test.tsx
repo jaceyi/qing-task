@@ -4,6 +4,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider'
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs'
 import { zhCN } from '@mui/x-date-pickers/locales'
 import { ThemeProvider } from '@mui/material'
+import { addDays, toDateTimeInput } from '../lib/date'
 import { appTheme } from '../theme'
 import type { Task, TaskLog } from '../types'
 import { TaskDetail } from './TaskDetail'
@@ -46,8 +47,50 @@ function renderDetail(onSave = vi.fn(async () => undefined), logs: TaskLog[] = [
   }
 }
 
+function renderDetailWithTask(detailTask: Task) {
+  return render(
+    <ThemeProvider theme={appTheme}>
+      <LocalizationProvider dateAdapter={AdapterDayjs} localeText={zhCN.components.MuiLocalizationProvider.defaultProps.localeText}>
+        <TaskDetail
+          task={detailTask}
+          logs={[]}
+          logsError=""
+          onCopy={vi.fn()}
+          onSave={vi.fn(async () => undefined)}
+          onChangeType={vi.fn(async () => undefined)}
+          onSetCompleted={vi.fn(async () => true)}
+          onAdjust={vi.fn(async () => true)}
+          onDelete={vi.fn(async () => undefined)}
+          onNotify={vi.fn()}
+        />
+      </LocalizationProvider>
+    </ThemeProvider>,
+  )
+}
+
 describe('任务详情自动保存', () => {
   afterEach(() => vi.useRealTimers())
+
+  it('逾期未完成任务在当前状态卡片中显示逾期提示', () => {
+    const overdueTask: Task = {
+      ...task,
+      startDate: toDateTimeInput(addDays(new Date(), -2)),
+      endDate: toDateTimeInput(addDays(new Date(), -1)),
+    }
+    renderDetailWithTask(overdueTask)
+    expect(screen.getByText('已过计划时间')).toBeInTheDocument()
+  })
+
+  it('已完成任务不显示逾期提示', () => {
+    const completedOverdueTask: Task = {
+      ...task,
+      startDate: toDateTimeInput(addDays(new Date(), -2)),
+      endDate: toDateTimeInput(addDays(new Date(), -1)),
+      completed: true,
+    }
+    renderDetailWithTask(completedOverdueTask)
+    expect(screen.queryByText('已过计划时间')).not.toBeInTheDocument()
+  })
 
   it('输入停止后自动保存基本信息', async () => {
     vi.useFakeTimers()

@@ -16,12 +16,13 @@ import AddOutlined from '@mui/icons-material/AddOutlined'
 import CheckOutlined from '@mui/icons-material/CheckOutlined'
 import ContentCopyOutlined from '@mui/icons-material/ContentCopyOutlined'
 import DeleteOutlineOutlined from '@mui/icons-material/DeleteOutlineOutlined'
+import EventBusyOutlined from '@mui/icons-material/EventBusyOutlined'
 import LayersOutlined from '@mui/icons-material/LayersOutlined'
 import RemoveOutlined from '@mui/icons-material/RemoveOutlined'
 import ScheduleOutlined from '@mui/icons-material/ScheduleOutlined'
-import { formatLogDate, normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
+import { formatDateRange, formatDateTimeDisplay, formatLogDate, normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
 import { nextOccurrence, parseLocalDateTime } from '../lib/recurrence'
-import { isTaskComplete } from '../lib/taskLogic'
+import { isTaskComplete, isTaskOverdue } from '../lib/taskLogic'
 import type { Tag, Task, TaskInfoFields, TaskLog, TaskType } from '../types'
 import { ArrowForwardOutlined } from '@mui/icons-material'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -80,7 +81,7 @@ function validateInfoFields(fields: TaskInfoFields, taskType: TaskType) {
   if (fields.recurrence.end.kind === 'until' && fields.recurrence.end.date < fields.startDate.slice(0, 10)) return '重复截止日期不能早于任务开始日期'
   const currentStart = parseLocalDateTime(fields.startDate)
   const currentEnd = parseLocalDateTime(fields.endDate)
-  const next = currentStart ? nextOccurrence(fields, currentStart) : null
+  const next = currentStart ? nextOccurrence(fields) : null
   const nextStart = next ? parseLocalDateTime(next.startDate) : null
   if (currentEnd && nextStart && currentEnd >= nextStart) return '当前时间范围与下一次重复时间重叠'
   return ''
@@ -305,6 +306,33 @@ export function TaskDetail({
           <Paper component="section" variant="outlined" className="p-6 max-md:p-5">
             <SectionHeader title="当前状态" />
             <Box className="mt-4">
+              {task.recurrence ? (
+                <Paper
+                  variant="outlined"
+                  className={`mb-3 flex items-center gap-3 p-3 ${isTaskOverdue(task) ? 'border-[#f3d3c5] bg-apricot-soft' : 'border-line bg-fill'}`}
+                  {...(isTaskOverdue(task) ? { role: 'status' } : {})}
+                >
+                  <Box className={`grid size-10 shrink-0 place-items-center rounded-[10px] bg-surface ${isTaskOverdue(task) ? 'text-apricot-strong' : 'text-primary'}`}>
+                    {isTaskOverdue(task) ? <EventBusyOutlined /> : <ScheduleOutlined />}
+                  </Box>
+                  <Box className="flex-1">
+                    <Typography variant="body2" sx={{ fontWeight: 750 }}>{isTaskOverdue(task) ? '本期已逾期' : '本期时间'}</Typography>
+                    <Typography variant="caption">
+                      {formatDateRange(task.startDate, task.endDate)}{isTaskOverdue(task) ? '，仍未完成或跳过。' : ''}
+                    </Typography>
+                  </Box>
+                </Paper>
+              ) : isTaskOverdue(task) ? (
+                <Paper variant="outlined" role="status" className="mb-3 flex items-center gap-3 border-[#f3d3c5] bg-apricot-soft p-3">
+                  <Box className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-surface text-apricot-strong">
+                    <EventBusyOutlined />
+                  </Box>
+                  <Box className="flex-1">
+                    <Typography variant="body2" sx={{ fontWeight: 750 }}>已过计划时间</Typography>
+                    <Typography variant="caption">计划于 {formatDateTimeDisplay(task.endDate)} 结束，仍未完成。</Typography>
+                  </Box>
+                </Paper>
+              ) : null}
               {task.type === 'single' ? (
                 <Paper variant="outlined" className={`flex items-center gap-3 p-3 ${complete ? 'bg-mint-soft' : 'bg-fill'}`}>
                   <Box className={`grid size-10 place-items-center rounded-[10px] bg-surface ${complete ? 'text-mint-strong' : 'text-primary'}`}>

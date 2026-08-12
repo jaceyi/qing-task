@@ -90,6 +90,10 @@ export function useBoardNavigation() {
     navigate({ name: 'settings' }, { backRoute: view.route })
   }, [navigate, view.route])
 
+  const openAnalytics = useCallback(() => {
+    navigate({ name: 'analytics' }, { backRoute: view.route })
+  }, [navigate, view.route])
+
   const openTask = useCallback((taskId: string) => {
     navigate({ name: 'task-detail', taskId }, { backRoute: view.route })
   }, [navigate, view.route])
@@ -117,6 +121,7 @@ export function useBoardNavigation() {
     updateTagFilter,
     openTagBoard,
     openSettings,
+    openAnalytics,
     openTask,
     openTaskForm,
     returnToBoard,

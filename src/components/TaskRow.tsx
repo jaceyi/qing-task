@@ -4,11 +4,12 @@ import AddOutlined from '@mui/icons-material/AddOutlined'
 import CalendarTodayOutlined from '@mui/icons-material/CalendarTodayOutlined'
 import CheckOutlined from '@mui/icons-material/CheckOutlined'
 import CloseOutlined from '@mui/icons-material/CloseOutlined'
+import EventBusyOutlined from '@mui/icons-material/EventBusyOutlined'
 import RemoveOutlined from '@mui/icons-material/RemoveOutlined'
 import RepeatOutlined from '@mui/icons-material/RepeatOutlined'
 import { formatDateRange } from '../lib/date'
 import { describeRecurrence } from '../lib/recurrence'
-import { isTaskComplete } from '../lib/taskLogic'
+import { isTaskComplete, isTaskOverdue } from '../lib/taskLogic'
 import type { Tag, Task } from '../types'
 
 type SwipeDirection = 'positive' | 'negative'
@@ -38,6 +39,7 @@ export function TaskRow({ task, onOpen, onAction, onResetProgress, onNotify, onU
     lastOffset: 0,
   })
   const complete = isTaskComplete(task)
+  const overdue = isTaskOverdue(task)
   const positiveDisabled = task.type === 'single' ? task.completed : task.count >= task.targetCount
   const negativeDisabled = task.type === 'single' ? !task.completed : task.count <= 0
   const progress = task.type === 'progress' ? Math.round((task.count / task.targetCount) * 100) : 0
@@ -298,10 +300,18 @@ export function TaskRow({ task, onOpen, onAction, onResetProgress, onNotify, onU
           >
             <span className={`task-title max-w-full truncate text-sm font-semibold ${complete ? 'text-[#9a9aaa] line-through decoration-[#c5c5d0]' : 'text-ink group-hover/copy:text-primary-strong'}`}>{task.title}</span>
             <span className="task-meta-line flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
-              <span className={`task-date text-[11px] ${!task.startDate && !task.endDate ? 'inline-flex items-center gap-1 text-mint-strong' : 'text-muted'}`}>
+              <span className={`task-date text-[11px] ${!task.startDate && !task.endDate ? 'inline-flex items-center gap-1 text-mint-strong' : overdue ? 'font-medium text-apricot-strong' : 'text-muted'}`}>
                 {!task.startDate && !task.endDate && <CalendarTodayOutlined sx={{ fontSize: 11 }} />}
                 {formatDateRange(task.startDate, task.endDate)}
               </span>
+              {overdue && (
+                <span
+                  className="overdue-badge inline-flex h-[18px] shrink-0 items-center gap-1 rounded-[6px] bg-apricot-soft px-2 text-[9px] leading-none font-semibold text-apricot-strong max-md:h-5 max-md:text-[10px]"
+                  title="已过计划结束时间"
+                >
+                  <EventBusyOutlined sx={{ fontSize: 11 }} />逾期
+                </span>
+              )}
               {task.recurrence && (
                 <span
                   className="recurrence-badge inline-flex h-[18px] shrink-0 items-center gap-1 rounded-[6px] bg-primary-soft px-2 text-[9px] leading-none text-primary-strong max-md:h-5 max-md:text-[10px]"

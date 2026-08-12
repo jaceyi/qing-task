@@ -1,10 +1,25 @@
-import { taskOverlapsScope } from './date'
+import { parseLocalDate, taskOverlapsScope } from './date'
 import { syncRecurrenceTiming } from './recurrence'
 import { dedupeTagIds, taskMatchesTags } from './tagLogic'
 import type { CustomDateRange, Tag, TagMatchMode, Task, TaskDraft, TaskInfoFields, TaskType, TimeFilterScope } from '../types'
 
 export function isTaskComplete(task: Pick<Task, 'type' | 'completed' | 'count' | 'targetCount'>) {
   return task.type === 'single' ? task.completed : task.count === task.targetCount
+}
+
+/**
+ * 逾期：计划结束时间已过仍未完成。
+ * 已完成任务、被跳过结束的系列与无时间任务不参与逾期判定；
+ * 重复任务按当前一期的结束时间判断。
+ */
+export function isTaskOverdue(
+  task: Pick<Task, 'endDate' | 'type' | 'completed' | 'count' | 'targetCount' | 'seriesState'>,
+  reference = new Date(),
+): boolean {
+  if (task.seriesState === 'ended') return false
+  if (isTaskComplete(task)) return false
+  const end = parseLocalDate(task.endDate, 'end')
+  return Boolean(end && end < reference)
 }
 
 export function completedOccurrenceTaskId(taskId: string, key: string) {
@@ -60,6 +75,9 @@ export function filterAndSortTasks(
     .sort((a, b) => {
       const completionDifference = Number(isTaskComplete(a)) - Number(isTaskComplete(b))
       if (completionDifference !== 0) return completionDifference
+      // 未完成区内逾期优先，其次按创建时间倒序
+      const overdueDifference = Number(isTaskOverdue(b, reference)) - Number(isTaskOverdue(a, reference))
+      if (overdueDifference !== 0) return overdueDifference
       return (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0)
     })
 }

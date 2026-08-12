@@ -61,6 +61,7 @@ export function AppHeader({
   const [profileAnchor, setProfileAnchor] = useState<HTMLElement | null>(null)
   const mobileSearchInputRef = useRef<HTMLInputElement>(null)
   const settingsOpen = routeSurface === 'settings'
+  const analyticsOpen = routeSurface === 'analytics'
   const showingDetail = routeSurface === 'detail'
   const showingForm = routeSurface === 'form'
   const avatarText = displayName.slice(0, 1).toUpperCase()
@@ -82,7 +83,7 @@ export function AppHeader({
     <Box component="header" className="sticky top-0 z-10 flex h-[72px] min-w-0 items-center gap-4 border-b border-line bg-white/90 px-6 backdrop-blur max-md:h-[calc(64px+env(safe-area-inset-top))] max-md:gap-2.5 max-md:pr-[max(16px,env(safe-area-inset-right))] max-md:pb-0 max-md:pl-[max(16px,env(safe-area-inset-left))] max-md:pt-[env(safe-area-inset-top)] md:col-start-3 md:col-span-2">
       {/* 桌面面包屑 */}
       <Box className="mr-auto hidden items-center gap-2.5 text-[13px] md:flex">
-        {settingsOpen ? <span className="font-semibold text-ink">设置</span> : routeSurface === 'form' ? (
+        {settingsOpen ? <span className="font-semibold text-ink">设置</span> : analyticsOpen ? <span className="font-semibold text-ink">分析</span> : routeSurface === 'form' ? (
           <>
             <span className="font-semibold text-ink">任务</span><b className="font-normal text-line-strong">/</b><strong className="font-medium text-muted">新建任务</strong>
           </>
@@ -103,7 +104,7 @@ export function AppHeader({
             <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-white shadow-[0_6px_14px_rgba(99,117,215,0.2)]">
               <CheckOutlined sx={{ fontSize: 18 }} />
             </span>
-            <strong className="overflow-hidden text-lg whitespace-nowrap text-ellipsis text-ink">{settingsOpen ? '设置' : boardKind === 'tag' ? '标签任务' : `${scopeLabels[calendarScope]}任务`}</strong>
+            <strong className="overflow-hidden text-lg whitespace-nowrap text-ellipsis text-ink">{settingsOpen ? '设置' : analyticsOpen ? '分析' : boardKind === 'tag' ? '标签任务' : `${scopeLabels[calendarScope]}任务`}</strong>
           </>
         )}
       </Box>

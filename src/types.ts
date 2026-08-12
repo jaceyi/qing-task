@@ -102,6 +102,20 @@ export interface TaskLog {
   seq?: number
 }
 
+/** 重复任务周期账本：每完成/跳过一期写入一条，供分析页回溯完成率与准时率。 */
+export interface OccurrenceRecord {
+  taskId: string
+  occurrenceKey: string
+  result: 'completed' | 'skipped'
+  scheduledStart: string
+  scheduledEnd: string
+  count: number
+  targetCount: number
+  title: string
+  tagIds: string[]
+  completedAt: Date | null
+}
+
 export interface UserPreferences {
   hideCompleted: boolean
 }

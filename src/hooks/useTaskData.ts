@@ -215,7 +215,7 @@ export function useTaskDataStore(userId: string | null, demoMode: boolean) {
       const mutation = demoMode ? null : setSingleCompletion(userId!, current, completed)
       if (completed && current.recurrence && current.seriesState !== 'ended') {
         const completedAt = new Date()
-        const next = nextOccurrence(current, completedAt)
+        const next = nextOccurrence(current)
         lastStatusActionRef.current = { previous: { ...current }, kind: 'recurrence-completed', expiresAt: Date.now() + 10_000, logRefs: mutation?.logRefs }
         replaceTasks((tasks) => tasks.flatMap((task) => {
           if (task.id !== taskId) return task
@@ -259,7 +259,7 @@ export function useTaskDataStore(userId: string | null, demoMode: boolean) {
       const mutation = demoMode ? null : adjustTaskProgress(userId!, current, delta)
       if (delta > 0 && count === current.targetCount && current.recurrence && current.seriesState !== 'ended') {
         const completedAt = new Date()
-        const next = nextOccurrence(current, completedAt)
+        const next = nextOccurrence(current)
         lastStatusActionRef.current = { previous: { ...current }, kind: 'recurrence-completed', expiresAt: Date.now() + 10_000, logRefs: mutation?.logRefs }
         replaceTasks((tasks) => tasks.flatMap((task) => {
           if (task.id !== taskId) return task
@@ -317,7 +317,7 @@ export function useTaskDataStore(userId: string | null, demoMode: boolean) {
     const current = tasksRef.current.find((task) => task.id === taskId)
     if (!current?.recurrence || current.seriesState === 'ended') return false
     const mutation = demoMode ? null : skipRecurringOccurrence(userId!, current)
-    const next = nextOccurrence(current, new Date())
+    const next = nextOccurrence(current)
     lastStatusActionRef.current = { previous: { ...current }, kind: 'recurrence-skipped', expiresAt: Date.now() + 10_000, logRefs: mutation?.logRefs }
     replaceTasks((tasks) => tasks.map((task) => task.id === taskId
       ? next

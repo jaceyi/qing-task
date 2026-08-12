@@ -108,36 +108,49 @@ function withinEnd(rule: RecurrenceRule, value: Date) {
   return toLocalDateTime(value).slice(0, 10) <= rule.end.date
 }
 
-export function nextOccurrence(
-  task: Pick<Task, 'startDate' | 'endDate' | 'recurrence'>,
-  completedAt = new Date(),
-) {
+/**
+ * 下一期 = 严格晚于当前一期开始时间的第一个计划点（逐期顺延）。
+ * 逾期完成/跳过时不跳过已错过的期：例如每天任务 10 号到期、12 号才完成，
+ * 下一期仍是 11 号，用户可逐期补完（与 iOS 提醒事项一致）。
+ */
+export function nextOccurrence(task: Pick<Task, 'startDate' | 'endDate' | 'recurrence'>) {
   const rule = task.recurrence
   const currentStart = parseLocalDateTime(task.startDate)
   if (!rule || !currentStart) return null
-  const threshold = new Date(Math.max(currentStart.getTime(), completedAt.getTime()))
-  const nextStart = afterThreshold(rule, threshold)
+  const nextStart = afterThreshold(rule, currentStart)
   if (!nextStart || !withinEnd(rule, nextStart)) return null
   const minutes = Math.max(0, rule.durationMinutes ?? durationMinutes(task.startDate, task.endDate))
   const nextEnd = new Date(nextStart.getTime() + minutes * MINUTE)
   return { startDate: toLocalDateTime(nextStart), endDate: toLocalDateTime(nextEnd) }
 }
 
-export function previewRecurrence(rule: RecurrenceRule, count = 3) {
+/**
+ * 严格晚于 reference（默认当前时刻）的 count 个计划点，供编辑器“后续三次”预览：
+ * 系列进行中时只展示未来的期，不会把已逾期的历史期当成“后续”；
+ * 参考时刻早于首期（锚点）时，首期本身就是第一个未来计划点。
+ */
+export function previewRecurrence(rule: RecurrenceRule, count = 3, reference = new Date()) {
   const result: Array<{ startDate: string; endDate: string }> = []
-  let currentStart = rule.anchorStart
-  let currentEnd = toLocalDateTime(
-    new Date((parseLocalDateTime(currentStart)?.getTime() ?? 0) + rule.durationMinutes * MINUTE),
-  )
-  for (let index = 0; index < count; index += 1) {
-    const next = nextOccurrence(
-      { startDate: currentStart, endDate: currentEnd, recurrence: rule },
-      parseLocalDateTime(currentStart) ?? new Date(),
-    )
-    if (!next) break
-    result.push(next)
-    currentStart = next.startDate
-    currentEnd = next.endDate
+  const minutes = Math.max(0, rule.durationMinutes)
+  const push = (start: Date) => {
+    result.push({
+      startDate: toLocalDateTime(start),
+      endDate: toLocalDateTime(new Date(start.getTime() + minutes * MINUTE)),
+    })
+  }
+
+  const anchor = parseLocalDateTime(rule.anchorStart)
+  let threshold = reference
+  if (anchor && threshold < anchor) {
+    if (!withinEnd(rule, anchor)) return result
+    push(anchor)
+    threshold = anchor
+  }
+  while (result.length < count) {
+    const nextStart = afterThreshold(rule, threshold)
+    if (!nextStart || !withinEnd(rule, nextStart)) break
+    push(nextStart)
+    threshold = nextStart
   }
   return result
 }

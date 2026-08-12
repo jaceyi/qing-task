@@ -152,13 +152,14 @@ export function TaskFormPanel({
     if (dateError) return setError(dateError)
     if (draft.type === 'progress' && draft.targetCount < 1) return setError('目标次数至少为 1')
     if (draft.recurrence) {
-      const preview = previewRecurrence(draft.recurrence, 1)[0]
-      const end = parseLocalDateTime(draft.endDate)
-      const nextStart = preview ? parseLocalDateTime(preview.startDate) : null
       if (!draft.startDate || !draft.endDate) return setError('请为重复任务设置执行时间')
       if (draft.recurrence.end.kind === 'until' && draft.recurrence.end.date < draft.startDate.slice(0, 10)) {
         return setError('重复截止日期不能早于任务开始日期')
       }
+      // 重叠校验的下一期从任务自身开始时间算起（与推进算法一致），而不是当前时刻
+      const preview = previewRecurrence(draft.recurrence, 1, parseLocalDateTime(draft.startDate) ?? new Date())[0]
+      const end = parseLocalDateTime(draft.endDate)
+      const nextStart = preview ? parseLocalDateTime(preview.startDate) : null
       if (nextStart && end && end >= nextStart) return setError('当前时间范围与下一次重复时间重叠，请调整重复计划')
     }
     setSaving(true)

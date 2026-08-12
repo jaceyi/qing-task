@@ -72,19 +72,26 @@ export function AppLayout() {
   const { user, demoMode, displayName, email } = useSession()
   const taskData = useTaskData()
   const ui = useUi()
-  const { view, openTimeBoard, openTagBoard, openSettings, returnToBoard } = useBoardNavigation()
+  const { view, openTimeBoard, openTagBoard, openSettings, openAnalytics, returnToBoard } = useBoardNavigation()
   const openTaskForm = useOpenTaskForm()
   const syncStatus = useSyncStatus()
   const mainRef = useRef<HTMLElement | null>(null)
   const [utilityExpanded, setUtilityExpanded] = useState(
     () => localStorage.getItem(UTILITY_PANEL_STORAGE_KEY) !== 'collapsed',
   )
+  // 网格宽度过渡只在用户点击折叠/展开时启用；
+  // 路由切换导致的模板变化瞬时应用，避免进看板时列表变宽的动画
+  const [utilityAnimating, setUtilityAnimating] = useState(false)
+  const utilityAnimateTimer = useRef<number | undefined>(undefined)
 
   const surface = surfaceFromPathname(location.pathname)
   const settingsOpen = surface === 'settings'
+  const analyticsOpen = surface === 'analytics'
   const showingDetail = surface === 'detail'
   const showingForm = surface === 'form'
-  const showingBottomNav = surface === 'board'
+  const showingBottomNav = surface === 'board' || surface === 'analytics'
+  // 分析面隐藏右侧辅助面板，主内容跨两列占满其轨道，避免留出空白
+  const mainWide = showingDetail || settingsOpen || analyticsOpen
 
   const SyncIcon = syncStatus.kind === 'offline'
     ? CloudOffOutlined
@@ -113,6 +120,9 @@ export function AppLayout() {
   }, [location.pathname, location.search, surface])
 
   const toggleUtilityPanel = () => {
+    window.clearTimeout(utilityAnimateTimer.current)
+    setUtilityAnimating(true)
+    utilityAnimateTimer.current = window.setTimeout(() => setUtilityAnimating(false), 260)
     setUtilityExpanded((expanded) => {
       const next = !expanded
       localStorage.setItem(UTILITY_PANEL_STORAGE_KEY, next ? 'expanded' : 'collapsed')
@@ -141,12 +151,11 @@ export function AppLayout() {
     ui.notify(copiedFrom ? '任务副本已创建' : '任务已创建')
   }, [taskData, ui])
 
-  const utilityVisible = !showingDetail && !settingsOpen
+  const utilityVisible = !showingDetail && !settingsOpen && !analyticsOpen
   const utilityCollapsed = utilityVisible && !utilityExpanded
-  const mainWide = showingDetail || settingsOpen
 
   return (
-    <Box className={`grid min-h-svh bg-base transition-[grid-template-columns] duration-200 ease-out md:grid-rows-[72px_minmax(0,1fr)] max-md:block max-md:bg-surface ${
+    <Box className={`grid min-h-svh bg-base ${utilityAnimating ? 'transition-[grid-template-columns] duration-200 ease-out' : ''} md:grid-rows-[72px_minmax(0,1fr)] max-md:block max-md:bg-surface ${
       utilityCollapsed
         ? 'lg:grid-cols-[64px_224px_minmax(560px,1fr)_56px] max-lg:grid-cols-[60px_192px_minmax(520px,1fr)_52px]'
         : 'lg:grid-cols-[64px_224px_minmax(560px,1fr)_248px] max-lg:grid-cols-[60px_192px_minmax(520px,1fr)_224px]'
@@ -157,8 +166,11 @@ export function AppLayout() {
           <CheckOutlined sx={{ fontSize: 20 }} />
         </IconButton>
         <nav className="flex flex-col gap-2">
-          <IconButton className={`size-10 rounded-md ${!settingsOpen ? 'bg-primary-soft text-primary-strong' : 'text-ink-2 hover:bg-primary-soft hover:text-primary-strong'}`} onClick={() => openTimeBoard('all')} aria-label="任务">
+          <IconButton className={`size-10 rounded-md ${!settingsOpen && !analyticsOpen ? 'bg-primary-soft text-primary-strong' : 'text-ink-2 hover:bg-primary-soft hover:text-primary-strong'}`} onClick={() => openTimeBoard('all')} aria-label="任务">
             <ChecklistOutlined sx={{ fontSize: 20 }} />
+          </IconButton>
+          <IconButton className={`size-10 rounded-md ${analyticsOpen ? 'bg-primary-soft text-primary-strong' : 'text-ink-2 hover:bg-primary-soft hover:text-primary-strong'}`} onClick={openAnalytics} aria-label="分析">
+            <AnalyticsOutlined sx={{ fontSize: 20 }} />
           </IconButton>
         </nav>
         <IconButton className={`mt-auto size-10 rounded-md ${settingsOpen ? 'bg-primary-soft text-primary-strong' : 'text-ink-2 hover:bg-primary-soft hover:text-primary-strong'}`} onClick={openSettings} aria-label="设置">
@@ -299,18 +311,18 @@ export function AppLayout() {
         </aside>
       )}
 
-      {/* 移动端底部导航：统一 56px 高度；“分析”为占位入口，暂不响应点击 */}
+      {/* 移动端底部导航：统一 56px 高度；任务与分析两个入口，选中态由当前路由决定 */}
       {showingBottomNav && (
         <div className="fixed inset-x-[max(14px,calc(env(safe-area-inset-left)+8px))] bottom-[max(12px,calc(env(safe-area-inset-bottom)+8px))] z-20 mx-auto hidden max-w-[430px] grid-cols-[minmax(0,1fr)_56px] items-center gap-2.5 max-md:grid">
           <BottomNavigation
             component="nav"
             aria-label="移动端导航"
             showLabels
-            value="tasks"
+            value={analyticsOpen ? 'analytics' : 'tasks'}
             className="grid h-14 min-h-14 grid-cols-2 place-items-stretch overflow-hidden rounded-full border border-line bg-white/95 px-1.5 shadow-[0_12px_32px_rgba(54,52,80,0.13)] backdrop-blur-xl"
           >
             <BottomNavigationAction value="tasks" label="任务" icon={<ChecklistOutlined />} onClick={() => openTimeBoard('all')} />
-            <BottomNavigationAction value="analytics" label="分析" icon={<AnalyticsOutlined />} />
+            <BottomNavigationAction value="analytics" label="分析" icon={<AnalyticsOutlined />} onClick={openAnalytics} />
           </BottomNavigation>
           <Fab color="primary" className="size-14" aria-label="新建任务" onClick={() => openTaskForm()}><AddOutlined /></Fab>
         </div>

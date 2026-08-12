@@ -106,6 +106,17 @@ describe('路由表', () => {
     expect(screen.getByText('退出登录')).toBeInTheDocument()
   })
 
+  it('分析页基于体验数据渲染概览与趋势', () => {
+    renderAt('/analytics')
+    expect(screen.getByRole('heading', { name: '分析' })).toBeInTheDocument()
+    expect(screen.getByText('已完成')).toBeInTheDocument()
+    expect(screen.getByText('完成趋势')).toBeInTheDocument()
+    expect(screen.getByText('重复任务健康度')).toBeInTheDocument()
+    expect(screen.getByText('标签分布')).toBeInTheDocument()
+    // 体验数据中的系列与完成记录应出现在分析视图中
+    expect(screen.getByText('阅读 30 分钟')).toBeInTheDocument()
+  })
+
   it('未知路径重定向到任务看板', () => {
     renderAt('/unknown-path')
     expect(screen.getByRole('heading', { name: '全部任务' })).toBeInTheDocument()
