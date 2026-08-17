@@ -48,6 +48,15 @@ export const appTheme = createTheme({
     MuiButton: {
       defaultProps: { disableElevation: true },
     },
+    MuiBottomNavigationAction: {
+      styleOverrides: {
+        // 选中态只变色不放大字号，避免切换时文字跳动
+        label: {
+          fontSize: '0.75rem',
+          '&.Mui-selected': { fontSize: '0.75rem' },
+        },
+      },
+    },
     MuiIconButton: {
       defaultProps: { size: 'small' },
     },
