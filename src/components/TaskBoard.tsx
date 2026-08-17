@@ -16,6 +16,7 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Typography,
+  useMediaQuery,
 } from '@mui/material'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import CalendarMonthOutlined from '@mui/icons-material/CalendarMonthOutlined'
@@ -52,6 +53,7 @@ interface TaskBoardProps {
   tagMatchMode?: TagMatchMode
   onTagFilterChange?: (tagIds: string[], matchMode: TagMatchMode) => void
   onUndoableStatusChange?: (message: string) => void
+  onOpenTag?: (tagId: string) => void
   title?: string
 }
 
@@ -84,10 +86,14 @@ export function TaskBoard({
   tagMatchMode = 'all',
   onTagFilterChange,
   onUndoableStatusChange,
+  onOpenTag,
   title,
 }: TaskBoardProps) {
+  const isMobile = useMediaQuery((theme) => theme.breakpoints.down('md'))
   const [customDraft, setCustomDraft] = useState<CustomDateRange>(() => customRange ?? { startDate: toDateInput(), endDate: toDateInput() })
   const availableScopes = useMemo(() => boardKind === 'tag' ? [...scopes, customScope] : scopes, [boardKind])
+  // 标签看板在移动端有 4 个时间筛选：去掉图标并允许横向滚动，避免换行拥挤
+  const compactScopes = isMobile && boardKind === 'tag'
   const visibleTasks = filterAndSortTasks(tasks, scope, hideCompleted, searchTerm, new Date(), { tags, selectedTagIds, matchMode: tagMatchMode, customRange })
   const active = visibleTasks.filter((task) => !isTaskComplete(task))
   const completed = visibleTasks.filter(isTaskComplete)
@@ -123,14 +129,33 @@ export function TaskBoard({
         <Typography id="page-title" component="h1" className="text-[clamp(22px,2vw,26px)] leading-[1.18] tracking-[-0.035em] text-ink">{title ?? scopeTitles[scope]}</Typography>
       </Box>
 
+      {/* 移动端标签入口：横向滚动的标签条，点击直达对应标签看板；桌面端由侧栏承担 */}
+      {boardKind === 'time' && tags.length > 0 && onOpenTag && (
+        <Box className="-mx-1 mb-3 flex gap-1.5 overflow-x-auto px-1 pb-1 md:hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="标签看板入口">
+          {tags.map((tag) => (
+            <button
+              key={tag.id}
+              type="button"
+              onClick={() => onOpenTag(tag.id)}
+              aria-label={`查看标签看板：${tag.name}`}
+              className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[11px] font-medium text-ink-2 active:border-[#cdd3f3] active:bg-primary-soft active:text-primary-strong"
+            >
+              <i className={`tag-color is-${tag.color}`} />
+              {tag.name}
+            </button>
+          ))}
+        </Box>
+      )}
+
       <Tabs
         className={boardKind === 'tag' ? 'mb-4 w-full lg:w-[min(100%,430px)]' : 'mb-4 hidden w-full max-md:flex'}
         value={scope}
         onChange={(_, value) => selectScope(value)}
         aria-label="任务时间范围"
-        variant="fullWidth"
+        variant={compactScopes ? 'scrollable' : 'fullWidth'}
+        scrollButtons={false}
       >
-        {availableScopes.map(({ id, label, icon }) => <Tab key={id} id={`scope-tab-${id}`} value={id} icon={icon} iconPosition="start" label={label} />)}
+        {availableScopes.map(({ id, label, icon }) => <Tab key={id} id={`scope-tab-${id}`} value={id} icon={compactScopes ? undefined : icon} iconPosition="start" label={label} />)}
       </Tabs>
 
       {boardKind === 'tag' && scope === 'custom' && (

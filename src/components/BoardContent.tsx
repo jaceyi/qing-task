@@ -3,11 +3,12 @@ import { useTaskData } from '../context/TaskDataContext'
 import { useUi, useOpenTaskForm, useUndoableStatusNotify } from '../context/UiContext'
 import { useBoardNavigation } from '../hooks/useBoardNavigation'
 import { getBoardViewState } from '../lib/boardNavigation'
+import { readRaw, storageKeys, writeRaw } from '../lib/storage'
 import type { BoardRoute } from '../lib/routes'
 import type { Task } from '../types'
 import { TaskBoard } from './TaskBoard'
 
-const SWIPE_HINT_STORAGE_KEY = 'qing-task:swipe-hint'
+const SWIPE_HINT_STORAGE_KEY = storageKeys.swipeHint
 
 interface BoardContentProps {
   boardRoute: BoardRoute
@@ -20,11 +21,11 @@ interface BoardContentProps {
 export function BoardContent({ boardRoute }: BoardContentProps) {
   const taskData = useTaskData()
   const { searchTerm, notify } = useUi()
-  const { updateTimeScope, updateTagFilter, openTask } = useBoardNavigation()
+  const { updateTimeScope, updateTagFilter, openTask, openTagBoard } = useBoardNavigation()
   const openTaskForm = useOpenTaskForm()
   const notifyUndoableStatusChange = useUndoableStatusNotify()
   const [showSwipeHint, setShowSwipeHint] = useState(
-    () => localStorage.getItem(SWIPE_HINT_STORAGE_KEY) !== 'dismissed',
+    () => readRaw(SWIPE_HINT_STORAGE_KEY) !== 'dismissed',
   )
   const view = getBoardViewState(boardRoute)
   const selectedTagNames = taskData.tags
@@ -32,7 +33,7 @@ export function BoardContent({ boardRoute }: BoardContentProps) {
     .map((tag) => tag.name)
 
   const dismissSwipeHint = () => {
-    localStorage.setItem(SWIPE_HINT_STORAGE_KEY, 'dismissed')
+    writeRaw(SWIPE_HINT_STORAGE_KEY, 'dismissed')
     setShowSwipeHint(false)
   }
 
@@ -81,6 +82,7 @@ export function BoardContent({ boardRoute }: BoardContentProps) {
       tagMatchMode={view.matchMode}
       onTagFilterChange={updateTagFilter}
       onUndoableStatusChange={notifyUndoableStatusChange}
+      onOpenTag={openTagBoard}
       title={view.kind === 'tag' && selectedTagNames.length ? `#${selectedTagNames[0]}` : undefined}
       showSwipeHint={showSwipeHint}
       onDismissSwipeHint={dismissSwipeHint}
