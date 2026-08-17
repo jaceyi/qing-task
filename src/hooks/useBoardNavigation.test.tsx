@@ -93,4 +93,24 @@ describe('看板导航历史策略', () => {
     expect(window.location.pathname).toBe('/tasks/week')
     expect(window.location.search).toBe('?demo=1')
   })
+
+  it('从非看板面进入看板压入历史，浏览器返回可回到原页面', () => {
+    window.history.replaceState(null, '', '/analytics')
+    const replaceState = vi.spyOn(window.history, 'replaceState')
+    const pushState = vi.spyOn(window.history, 'pushState')
+    const { result } = renderHook(useBoardNavigation, { wrapper: RouterWrapper })
+    replaceState.mockClear()
+    pushState.mockClear()
+
+    act(() => result.current.openTagBoard('tag-work'))
+    expect(window.location.pathname).toBe('/tasks/tags/tag-work')
+    expect(pushState).toHaveBeenCalledTimes(1)
+    expect(replaceState).not.toHaveBeenCalled()
+
+    // 回到看板面后，看板之间切换仍是替换
+    act(() => result.current.openTimeBoard('today'))
+    expect(window.location.pathname).toBe('/tasks/today')
+    expect(replaceState).toHaveBeenCalledTimes(1)
+    expect(pushState).toHaveBeenCalledTimes(1)
+  })
 })

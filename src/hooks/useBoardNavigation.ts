@@ -43,6 +43,11 @@ export function useBoardNavigation() {
     [location.pathname, location.search, routeState.backRoute],
   )
   const view = useMemo<BoardViewState>(() => getBoardViewState(boardContext), [boardContext])
+  // 当前是否在看板面上：看板之间切换替换历史；从分析/详情等面进入看板则压入历史，浏览器返回能回到原页面
+  const onBoardSurface = useMemo(
+    () => boardRouteFromLocation(location.pathname, location.search) !== null,
+    [location.pathname, location.search],
+  )
 
   const navigate = useCallback(
     (next: AppRoute, options: NavigateOptions = {}) => {
@@ -70,8 +75,11 @@ export function useBoardNavigation() {
   )
 
   const openTimeBoard = useCallback((scope: BoardScope) => {
-    navigate(selectTimeBoardScope(view.route, scope))
-  }, [navigate, view.route])
+    navigate(
+      selectTimeBoardScope(view.route, scope),
+      onBoardSurface ? undefined : { mode: 'push', backRoute: view.route },
+    )
+  }, [navigate, onBoardSurface, view.route])
 
   const updateTimeScope = useCallback((scope: TimeFilterScope, range?: CustomDateRange) => {
     navigate(changeTimeScope(view.route, scope, range))
@@ -83,8 +91,11 @@ export function useBoardNavigation() {
   }, [navigate, view.route])
 
   const openTagBoard = useCallback((tagId: string) => {
-    navigate(createTagBoardRoute(tagId, view.route))
-  }, [navigate, view.route])
+    navigate(
+      createTagBoardRoute(tagId, view.route),
+      onBoardSurface ? undefined : { mode: 'push', backRoute: view.route },
+    )
+  }, [navigate, onBoardSurface, view.route])
 
   const openSettings = useCallback(() => {
     navigate({ name: 'settings' }, { backRoute: view.route })
