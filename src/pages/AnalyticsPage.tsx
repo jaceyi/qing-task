@@ -1,15 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Alert, Box, Button, Paper, TextField, Typography } from '@mui/material'
 import AddOutlined from '@mui/icons-material/AddOutlined'
 import CheckOutlined from '@mui/icons-material/CheckOutlined'
 import ChevronRightOutlined from '@mui/icons-material/ChevronRightOutlined'
 import CloseOutlined from '@mui/icons-material/CloseOutlined'
+import CloudOffOutlined from '@mui/icons-material/CloudOffOutlined'
 import InsightsOutlined from '@mui/icons-material/InsightsOutlined'
 import RepeatOutlined from '@mui/icons-material/RepeatOutlined'
 import ScheduleOutlined from '@mui/icons-material/ScheduleOutlined'
 import { SectionHeader } from '../components/SectionHeader'
 import { useTaskData } from '../context/TaskDataContext'
-import { useOpenTaskForm } from '../context/UiContext'
+import { useOpenTaskForm, useUi } from '../context/UiContext'
 import { useAnalyticsData } from '../hooks/useAnalyticsData'
 import { useBoardNavigation } from '../hooks/useBoardNavigation'
 import {
@@ -26,8 +27,9 @@ import {
   type AnalyticsRangePreset,
   type CompletionEvent,
 } from '../lib/analytics'
-import { addDays, toDateInput } from '../lib/date'
+import { addDays, formatLogDate, toDateInput } from '../lib/date'
 import { describeRecurrence } from '../lib/recurrence'
+import { readJSON, storageKeys, writeJSON } from '../lib/storage'
 import type { CustomDateRange, TagColor } from '../types'
 
 const presetOptions: Array<{ preset: AnalyticsRangePreset; label: string }> = [
@@ -36,6 +38,44 @@ const presetOptions: Array<{ preset: AnalyticsRangePreset; label: string }> = [
   { preset: 'month', label: '本月' },
   { preset: 'custom', label: '自定义' },
 ]
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+
+interface StoredAnalyticsUi {
+  preset?: unknown
+  customRange?: unknown
+  selectedTagIds?: unknown
+}
+
+interface AnalyticsUiState {
+  preset: AnalyticsRangePreset
+  customRange: CustomDateRange
+  selectedTagIds: string[]
+}
+
+function restoreCustomRange(value: unknown): CustomDateRange | null {
+  if (!value || typeof value !== 'object') return null
+  const { startDate, endDate } = value as CustomDateRange
+  if (typeof startDate !== 'string' || typeof endDate !== 'string') return null
+  if (!DATE_PATTERN.test(startDate) || !DATE_PATTERN.test(endDate) || startDate > endDate) return null
+  return { startDate, endDate }
+}
+
+/** 校验并归一化持久化的筛选状态，形状不符的字段回退默认值。 */
+const validateAnalyticsUi = (value: unknown): AnalyticsUiState | null => {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as StoredAnalyticsUi
+  return {
+    preset: presetOptions.some((option) => option.preset === raw.preset) ? raw.preset as AnalyticsRangePreset : '7d',
+    customRange: restoreCustomRange(raw.customRange) ?? {
+      startDate: toDateInput(addDays(new Date(), -13)),
+      endDate: toDateInput(new Date()),
+    },
+    selectedTagIds: Array.isArray(raw.selectedTagIds)
+      ? (raw.selectedTagIds as unknown[]).filter((id): id is string => typeof id === 'string')
+      : [],
+  }
+}
 
 const weekdayChars = ['日', '一', '二', '三', '四', '五', '六']
 
@@ -220,21 +260,33 @@ export function AnalyticsPage() {
   const { openTask, openTagBoard } = useBoardNavigation()
   const openTaskForm = useOpenTaskForm()
 
-  const [preset, setPreset] = useState<AnalyticsRangePreset>('7d')
-  const [customRange, setCustomRange] = useState<CustomDateRange>(() => ({
+  const [storedUi] = useState(() => readJSON(storageKeys.analyticsUi, validateAnalyticsUi))
+  const [preset, setPreset] = useState<AnalyticsRangePreset>(storedUi?.preset ?? '7d')
+  const [customRange, setCustomRange] = useState<CustomDateRange>(() => storedUi?.customRange ?? {
     startDate: toDateInput(addDays(new Date(), -13)),
     endDate: toDateInput(new Date()),
-  }))
-  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
+  })
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>(storedUi?.selectedTagIds ?? [])
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
+
+  useEffect(() => {
+    writeJSON(storageKeys.analyticsUi, { preset, customRange, selectedTagIds })
+  }, [preset, customRange, selectedTagIds])
+
+  // 加载完成后清除已不存在的标签筛选，避免残留无效过滤
+  useEffect(() => {
+    if (taskData.loading) return
+    setSelectedTagIds((ids) => ids.filter((id) => taskData.tags.some((tag) => tag.id === id)))
+  }, [taskData.loading, taskData.tags])
 
   const range = useMemo(() => getAnalyticsRange(preset, customRange), [preset, customRange])
   const previousWindow = useMemo(() => (range ? getPreviousRange(range) : null), [range])
   // 近 7/30 天提供环比：抓取窗口向前扩展一个等长区间
   const withPrevious = preset === '7d' || preset === '30d'
   const fetchSince = range ? (withPrevious && previousWindow ? previousWindow.start : range.start) : null
-  const { occurrences, logs, loading, error } = useAnalyticsData(fetchSince, taskData.tasks, reloadToken)
+  const { occurrences, logs, loading, error, refreshed, cachedAt } = useAnalyticsData(fetchSince, taskData.tasks, reloadToken)
+  const { online } = useUi()
 
   const events = useMemo(
     () => (range ? collectCompletionEvents(taskData.tasks, logs, occurrences, range) : []),
@@ -371,9 +423,15 @@ export function AnalyticsPage() {
             )}
           </div>
         )}
+        {!refreshed && (occurrences.length || logs.length) > 0 && (!online || Boolean(error)) && (
+          <p className="flex items-center gap-1 text-[11px] text-apricot-strong">
+            <CloudOffOutlined sx={{ fontSize: 13 }} />
+            网络不稳定，展示本地缓存{cachedAt ? `（${formatLogDate(new Date(cachedAt))} 更新）` : ''}
+          </p>
+        )}
       </div>
 
-      {error && (
+      {error && !(occurrences.length || logs.length) && (
         <Alert
           severity="error"
           className="mb-4"
