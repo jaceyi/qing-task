@@ -17,11 +17,14 @@ import CloseOutlined from '@mui/icons-material/CloseOutlined'
 import LayersOutlined from '@mui/icons-material/LayersOutlined'
 import { normalizeDateTimeInput, validateTaskDateRange } from '../lib/date'
 import { parseLocalDateTime, previewRecurrence, syncRecurrenceTiming } from '../lib/recurrence'
+import { readEnvelopeFresh, readJSON, removeStored, writeEnvelope } from '../lib/storage'
 import type { Tag, Task, TaskDraft, TaskType } from '../types'
 import { ConfirmDialog } from './ConfirmDialog'
 import { FieldLabel } from './FieldLabel'
 import { RecurrenceEditor } from './RecurrenceEditor'
 import { TagPicker } from './TagPicker'
+
+const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 interface TaskFormPanelProps {
   /** drawer：桌面端右侧抽屉；page：移动端路由下钻页面，顶部返回由应用顶栏承担。两者共用同一套表单内容与草稿保护逻辑。 */
@@ -63,11 +66,10 @@ function makeInitialDraft(sourceTask?: Task | null): TaskDraft {
   }
 }
 
-function readStoredDraft(storageKey: string, fallback: TaskDraft) {
-  try {
-    const stored = localStorage.getItem(storageKey)
-    if (!stored) return fallback
-    const parsed = JSON.parse(stored) as Partial<TaskDraft>
+function readStoredDraft(storageKey: string, fallback: TaskDraft): TaskDraft {
+  const validate = (value: unknown): TaskDraft | null => {
+    if (!value || typeof value !== 'object') return null
+    const parsed = value as Partial<TaskDraft>
     if (
       typeof parsed.title !== 'string'
       || typeof parsed.description !== 'string'
@@ -75,11 +77,13 @@ function readStoredDraft(storageKey: string, fallback: TaskDraft) {
       || typeof parsed.endDate !== 'string'
       || (parsed.type !== 'single' && parsed.type !== 'progress')
       || typeof parsed.targetCount !== 'number'
-    ) return fallback
+    ) return null
     return { ...fallback, ...parsed }
-  } catch {
-    return fallback
   }
+  const enveloped = readEnvelopeFresh(storageKey, validate, DRAFT_TTL_MS)
+  if (enveloped) return enveloped.value
+  // 旧版草稿为裸 JSON：直接读取，下次编辑时自动迁移为信封格式
+  return readJSON(storageKey, validate) ?? fallback
 }
 
 export function TaskFormPanel({
@@ -110,8 +114,8 @@ export function TaskFormPanel({
   }, [draftStorageKey, initialDraft])
 
   useEffect(() => {
-    if (dirty) localStorage.setItem(draftStorageKey, JSON.stringify(draft))
-    else localStorage.removeItem(draftStorageKey)
+    if (dirty) writeEnvelope(draftStorageKey, draft)
+    else removeStored(draftStorageKey)
   }, [dirty, draft, draftStorageKey])
 
   useEffect(() => {
@@ -166,7 +170,7 @@ export function TaskFormPanel({
     setError('')
     try {
       await onSubmit(draft, sourceTask?.id)
-      localStorage.removeItem(draftStorageKey)
+      removeStored(draftStorageKey)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '创建任务失败')
       setSaving(false)
@@ -181,7 +185,7 @@ export function TaskFormPanel({
       title="退出新建任务？"
       description="草稿已经保存在本机，你可以保留后退出，也可以彻底放弃。"
       onClose={() => setConfirmDiscard(false)}
-      onConfirm={() => { localStorage.removeItem(draftStorageKey); onDirtyChange?.(false); onClose() }}
+      onConfirm={() => { removeStored(draftStorageKey); onDirtyChange?.(false); onClose() }}
       confirmLabel="放弃草稿"
       confirmColor="error"
       cancelLabel="继续编辑"

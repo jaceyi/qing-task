@@ -802,10 +802,16 @@ export async function fetchAnalyticsHistory(
     (task) => !task.recurrence && !task.parentTaskId && task.updatedAt !== null && task.updatedAt >= since,
   )
 
-  const [occurrenceSnapshots, logSnapshots] = await Promise.all([
+  // 容忍部分成功：账本或日志任一失败时按已取到的部分计算，两者都失败才报错
+  const [occurrenceResult, logResult] = await Promise.allSettled([
     Promise.all(seriesTasks.map((task) => getDocs(collection(taskRef(userId, task.id), 'occurrences')))),
     Promise.all(logTasks.map((task) => getDocs(query(collection(taskRef(userId, task.id), 'logs'), where('createdAt', '>=', sinceTimestamp))))),
   ])
+  if (occurrenceResult.status === 'rejected' && logResult.status === 'rejected') {
+    throw occurrenceResult.reason instanceof Error ? occurrenceResult.reason : new Error('分析数据加载失败')
+  }
+  const occurrenceSnapshots = occurrenceResult.status === 'fulfilled' ? occurrenceResult.value : []
+  const logSnapshots = logResult.status === 'fulfilled' ? logResult.value : []
 
   const occurrences: OccurrenceRecord[] = occurrenceSnapshots.flatMap((snapshot, index) => snapshot.docs.map((entry) => {
     const data = entry.data()

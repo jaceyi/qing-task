@@ -44,6 +44,7 @@ import { useSyncStatus } from '../../hooks/useSyncStatus'
 import { auth } from '../../lib/firebase'
 import { taskOverlapsScope } from '../../lib/date'
 import { isTaskComplete } from '../../lib/taskLogic'
+import { readRaw, storageKeys, writeRaw } from '../../lib/storage'
 import { matchRoutePath, routeDefinitions, surfaceFromPathname } from '../../lib/routes'
 import type { BoardScope, TaskDraft } from '../../types'
 import '../../App.css'
@@ -60,8 +61,6 @@ const scopeIcons = {
   week: CalendarMonthOutlined,
 } satisfies Record<BoardScope, typeof LayersOutlined>
 
-const UTILITY_PANEL_STORAGE_KEY = 'qing-task:utility-panel'
-
 /**
  * 应用外壳：左侧导航栏、看板侧栏、顶栏、主内容（路由页面经 Outlet 渲染）、
  * 辅助面板与移动端底部导航。路由与页面无关的共享状态全部来自 Context。
@@ -77,7 +76,7 @@ export function AppLayout() {
   const syncStatus = useSyncStatus()
   const mainRef = useRef<HTMLElement | null>(null)
   const [utilityExpanded, setUtilityExpanded] = useState(
-    () => localStorage.getItem(UTILITY_PANEL_STORAGE_KEY) !== 'collapsed',
+    () => readRaw(storageKeys.utilityPanel) !== 'collapsed',
   )
   // 网格宽度过渡只在用户点击折叠/展开时启用；
   // 路由切换导致的模板变化瞬时应用，避免进看板时列表变宽的动画
@@ -125,7 +124,7 @@ export function AppLayout() {
     utilityAnimateTimer.current = window.setTimeout(() => setUtilityAnimating(false), 260)
     setUtilityExpanded((expanded) => {
       const next = !expanded
-      localStorage.setItem(UTILITY_PANEL_STORAGE_KEY, next ? 'expanded' : 'collapsed')
+      writeRaw(storageKeys.utilityPanel, next ? 'expanded' : 'collapsed')
       return next
     })
   }
@@ -143,7 +142,7 @@ export function AppLayout() {
     () => (drawerCopiedFrom ? taskData.tasks.find((task) => task.id === drawerCopiedFrom) ?? null : null),
     [drawerCopiedFrom, taskData.tasks],
   )
-  const drawerDraftStorageKey = `qing-task:draft:${user?.uid ?? 'demo'}:${drawerCopiedFrom ? `copy-${drawerCopiedFrom}` : 'new'}`
+  const drawerDraftStorageKey = storageKeys.draftFor(user?.uid ?? 'demo', drawerCopiedFrom ? `copy-${drawerCopiedFrom}` : 'new')
 
   const handleDrawerCreate = useCallback(async (draft: TaskDraft, copiedFrom?: string) => {
     await taskData.createTask(draft, copiedFrom)

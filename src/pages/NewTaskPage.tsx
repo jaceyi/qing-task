@@ -7,6 +7,7 @@ import { useSession } from '../context/SessionContext'
 import { useTaskData } from '../context/TaskDataContext'
 import { useUi } from '../context/UiContext'
 import { useBoardNavigation } from '../hooks/useBoardNavigation'
+import { storageKeys } from '../lib/storage'
 import type { TaskDraft } from '../types'
 
 /**
@@ -27,7 +28,7 @@ export function NewTaskPage() {
     () => (copyFrom ? taskData.tasks.find((task) => task.id === copyFrom) ?? null : null),
     [copyFrom, taskData.tasks],
   )
-  const draftStorageKey = `qing-task:draft:${userId ?? 'demo'}:${copyFrom ? `copy-${copyFrom}` : 'new'}`
+  const draftStorageKey = storageKeys.draftFor(userId ?? 'demo', copyFrom ? `copy-${copyFrom}` : 'new')
 
   useEffect(() => {
     if (copyFrom && taskData.dataReady && !taskData.tasks.some((task) => task.id === copyFrom)) {
