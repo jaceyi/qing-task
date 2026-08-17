@@ -242,7 +242,7 @@ export function AppLayout() {
       />
 
       {/* 主内容：移动端看板贴边展示，详情/新建/设置统一保留上下间距；横向间距由 main 统一提供，内容不再叠加自身 padding */}
-      <main ref={(node) => { mainRef.current = node }} className={`min-w-0 overflow-auto bg-surface px-8 pt-8 pb-24 max-lg:px-6 max-md:overflow-visible max-md:bg-surface max-md:pr-[max(16px,env(safe-area-inset-right))] max-md:pl-[max(16px,env(safe-area-inset-left))] lg:col-start-3 lg:row-start-2 ${surface === 'board' ? 'max-md:pt-0 max-md:pb-0' : 'max-md:pt-5 max-md:pb-8'} ${mainWide ? 'lg:col-span-2' : ''}`}>
+      <main ref={(node) => { mainRef.current = node }} className={`min-w-0 overflow-auto bg-surface px-8 pt-8 pb-24 max-lg:px-6 max-md:overflow-visible max-md:bg-surface max-md:pr-[max(16px,env(safe-area-inset-right))] max-md:pl-[max(16px,env(safe-area-inset-left))] lg:col-start-3 lg:row-start-2 ${surface === 'board' ? 'max-md:pt-0 max-md:pb-0' : 'max-md:pt-5 max-md:pb-8'} ${mainWide ? 'md:col-span-2' : ''}`}>
         {taskData.error && (
           <Alert severity="error" className="mb-2" action={<IconButton aria-label="关闭错误" onClick={() => taskData.setError('')}><CloseOutlined /></IconButton>}>
             {taskData.error}
